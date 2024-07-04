@@ -1,0 +1,66 @@
+LOCUS       O3-MvaE-O4              2434 bp    DNA              UNK 01-JAN-1980
+DEFINITION  Synthetic construct of O3-MvaE-O4.
+ACCESSION   O3-MvaE-O4
+VERSION     O3-MvaE-O4
+KEYWORDS    .
+SOURCE      .
+  ORGANISM  .
+            .
+FEATURES             Location/Qualifiers
+     misc_feature    1..6
+                     /label="BsaI"
+     misc_feature    7
+                     /label="A"
+     misc_feature    8..11
+                     /label="O3"
+     misc_feature    12..2423
+                     /label="MvaE"
+     misc_feature    2424..2427
+                     /label="O4"
+     misc_feature    2428
+                     /label="A"
+     misc_feature    2429..2434
+                     /label="BsaI"
+ORIGIN
+        1 ggtctcagca gatgaaaaca gtagttatta ttgatgcatt acggacacca attggaaaat
+       61 ataaaggcag cttaagtcaa gtaagtgccg tagacttagg aacacatgtt acaacacaac
+      121 ttttaaaaag acattccact atttctgaag aaattgatca agtaatcttt ggaaatgttt
+      181 tacaagctgg aaatggccaa aatcccgcac gacaaatagc aataaacagc ggtttgtctc
+      241 atgaaattcc cgcaatgacg gttaatgagg tctgcggatc aggaatgaag gccgttattt
+      301 tggcgaaaca attgattcaa ttaggagaag cggaagtttt aattgctggt gggattgaga
+      361 atatgtccca agcacctaaa ttacaacgat ttaattacga aacagaaagc tacgatgcgc
+      421 ctttttctag tatgatgtac gatgggttaa cggatgcctt tagtggtcag gcaatgggct
+      481 taactgctga aaatgtggcc gaaaagtatc atgtaactag agaagagcaa gatcaatttt
+      541 ctgtacattc acaattaaaa gcagctcaag cacaagcaga agggatattc gctgacgaaa
+      601 tagccccatt agaagtgtca ggaacgcttg tggagaaaga tgaagggatt cgccctaatt
+      661 cgagcgttga gaagctagga acgcttaaaa cagtttttaa agaagacggt actgtaacag
+      721 cagggaatgc atcaaccatt aatgatgggg cttctgcttt gattattgct tcacaagaat
+      781 atgccgaagc acacggtctt ccttatttag ctattattcg agacagtgtg gaagtcggta
+      841 ttgatccagc ctatatggga atttcgccga ttaaagccat tcaaaaactg ttagcgcgga
+      901 atcaacttac tacggaagaa attgatctgt atgaaatcaa cgaagcattt gcagcaactt
+      961 caatcgtggt ccaaagagaa ctggctttac cagaggaaaa ggtcaacatt tatggtggcg
+     1021 gtatttcatt aggtcatgcg attggtgcca caggtgctcg tttattaacg agtttaagtt
+     1081 atcaattaaa tcaaaaagaa aagaaatatg gcgtggcttc tttatgtatc ggcggtggct
+     1141 taggactcgc tatgctacta gaacgtcctc agcaaaaaaa aaacagccga ttttatcaaa
+     1201 tgagtcctga ggaacgcctg gcttctcttc ttaatgaagg ccagatttct gctgatacaa
+     1261 aaaaagaatt tgaaaatacg gctttatctt cgcagattgc caatcatatg attgaaaatc
+     1321 aaatcagtga aacagaagtg ccgatgggcg ttggcttaca tttaacagtg gacgaaactg
+     1381 attatttggt accaatggcg acagaagagc cctcagtgat tgcggctttg agtaatggtg
+     1441 caaaaatagc acaaggattt aaaacagtga atcaacaacg cttaatgcgt ggacaaatcg
+     1501 ttttttacga tgttgcagat cccgagtcat tgattgataa actacaagta agagaagcgg
+     1561 aaatttttca acaagcagag ttaagttatc catctatcgt taaacggggc ggcggcttaa
+     1621 gagatttgca atatcgtact tttgatgaat cgtttgtatc tgtcgacttt ttagtagatg
+     1681 ttaaggatgc aatgggggca aatatcgtta acgctatgtt ggaaggtgtg gccgagttgt
+     1741 tccgtgaatg gtttgcggag caaaagattt tattcagtat tttaagtaat tatgccacgg
+     1801 agtcggttgt tacgatgaaa acggctattc cagtttcacg tttaagtaag gggagcaatg
+     1861 gccgggaaat tgctgaaaaa attgttttag cttcacgcta tgcttcatta gatccttatc
+     1921 gggcagtcac gcataacaaa gggatcatga atggcattga agctgtagtt ttagctacag
+     1981 gaaatgatac acgcgctgtt agcgcttctt gtcatgcttt tgcggtgaag gaaggtcgct
+     2041 accaaggctt gactagttgg acgctggatg gcgaacaact aattggtgaa atttcagttc
+     2101 cgcttgcgtt agccacggtt ggcggtgcca caaaagtctt gcctaaatct caagcagccg
+     2161 ctgatttgtt agcagtgacg gatgcaaaag aactaagtcg agtagtagcg gctgttggtt
+     2221 tggcccaaaa tttagcggcg ttacgggcct tagtctctga aggaattcaa aaaggacaca
+     2281 tggctctaca agcacgttct ttagcgatga cggtcggagc tactggtaaa gaagttgagg
+     2341 cagtcgctca acaattaaaa cgtcaaaaaa cgatgaacca agaccgagcc ttggctattt
+     2401 taaatgattt aagaaaacaa taactaatga gacc
+//

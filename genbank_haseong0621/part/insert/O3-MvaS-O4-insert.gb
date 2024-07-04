@@ -1,0 +1,45 @@
+LOCUS       O3-MvaS-O4              1174 bp    DNA              UNK 01-JAN-1980
+DEFINITION  Synthetic construct of O3-MvaS-O4.
+ACCESSION   O3-MvaS-O4
+VERSION     O3-MvaS-O4
+KEYWORDS    .
+SOURCE      .
+  ORGANISM  .
+            .
+FEATURES             Location/Qualifiers
+     misc_feature    1..6
+                     /label="BsaI"
+     misc_feature    7
+                     /label="A"
+     misc_feature    8..11
+                     /label="O3"
+     misc_feature    12..1163
+                     /label="MvaS"
+     misc_feature    1164..1167
+                     /label="O4"
+     misc_feature    1168
+                     /label="A"
+     misc_feature    1169..1174
+                     /label="BsaI"
+ORIGIN
+        1 ggtctcagca gatgacaatt gggattgata aaattagttt ttttgtgccc ccttattata
+       61 ttgatatgac ggcactggct gaagccagaa atgtagaccc tggaaaattt catattggta
+      121 ttgggcaaga ccaaatggcg gtgaacccaa tcagccaaga tattgtgaca tttgcagcca
+      181 atgccgcaga agcgatcttg accaaagaag ataaagaggc cattgatatg gtgattgtcg
+      241 ggactgagtc cagtatcgat gagtcaaaag cggccgcagt tgtcttacat cgtttaatgg
+      301 ggattcaacc tttcgctcgc tctttcgaaa tcaaggaagc ttgttacgga gcaacagcag
+      361 gcttacagtt agctaagaat cacgtagcct tacatccaga taaaaaagtc ttggtcgtag
+      421 cagcagatat tgcaaaatat ggcttaaatt ctggcggtga gcctacacaa ggagctgggg
+      481 cggttgcaat gttagttgct agtgaaccgc gcattttggc tttaaaagag gataatgtga
+      541 tgctgacgca agatatctat gacttttggc gtccaacagg ccatccatat cctatggtcg
+      601 atggtccttt gtcaaacgaa acctacatcc aatcttttgc ccaagtctgg gatgaacata
+      661 aaaaacgaac cggtcttgat tttgcagatt atgatgcttt agcgttccat attccttaca
+      721 caaaaatggg caaaaaagcc ttattagcaa aaatctccga ccaaactgaa gcagaacagg
+      781 aacgaatttt agcccgttat gaagaaagca tcatctatag tcgtcgcgta ggaaacttgt
+      841 atacgggttc actttatctg ggactcattt cccttttaga aaatgcaacg actttaaccg
+      901 caggcaatca aattgggtta ttcagttatg gttctggtgc tgtcgctgaa tttttcactg
+      961 gtgaattagt agctggttat caaaatcatt tacaaaaaga aactcattta gcactgctgg
+     1021 ataatcggac agaactttct atcgctgaat atgaagccat gtttgcagaa actttagaca
+     1081 cagacattga tcaaacgtta gaagatgaat taaaatatag tatttctgct attaataata
+     1141 ccgttcgctc ttatcgaaac taactaatga gacc
+//

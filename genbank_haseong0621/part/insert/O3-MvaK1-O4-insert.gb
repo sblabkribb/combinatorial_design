@@ -1,0 +1,41 @@
+LOCUS       O3-MvaK1-O4              928 bp    DNA              UNK 01-JAN-1980
+DEFINITION  Synthetic construct of O3-MvaK1-O4.
+ACCESSION   O3-MvaK1-O4
+VERSION     O3-MvaK1-O4
+KEYWORDS    .
+SOURCE      .
+  ORGANISM  .
+            .
+FEATURES             Location/Qualifiers
+     misc_feature    1..6
+                     /label="BsaI"
+     misc_feature    7
+                     /label="A"
+     misc_feature    8..11
+                     /label="O3"
+     misc_feature    12..917
+                     /label="MvaK1"
+     misc_feature    918..921
+                     /label="O4"
+     misc_feature    922
+                     /label="A"
+     misc_feature    923..928
+                     /label="BsaI"
+ORIGIN
+        1 ggtctcagca gatggtgagc tgcagcgcgc cgggcaaaat ttatctgttt ggcgaacatg
+       61 cggtggtgta tggcgaaacc gcgattgcgt gcgcggtgga actgcgcacc cgcgtgcgcg
+      121 cggaactgaa cgatagcatt accattcaga gccagattgg ccgcaccggc ctggattttg
+      181 aaaaacatcc gtatgtgagc gcggtgattg aaaaaatgcg caaaagcatt ccgattaacg
+      241 gcgtgtttct gaccgtggat agcgatattc cggtgggcag cggcctgggc agcagcgcgg
+      301 cggtgaccat tgcgagcatt ggcgcgctga acgaactgtt tggctttggc ctgagcctgc
+      361 aggaaattgc gaaactgggc catgaaattg aaattaaagt gcagggcgcg gcgagcccga
+      421 ccgataccta tgtgagcacc tttggcggcg tggtgaccat tccggaacgc cgcaaactga
+      481 aaaccccgga ttgcggcatt gtgattggcg ataccggcgt gtttagcagc accaaagaac
+      541 tggtggcgaa cgtgcgccag ctgcgcgaaa gctatccgga tctgattgaa ccgctgatga
+      601 ccagcattgg caaaattagc cgcattggcg aacagctggt gctgagcggc gattatgcga
+      661 gcattggccg cctgatgaac gtgaaccagg gcctgctgga tgcgctgggc gtgaacattc
+      721 tggaactgag ccagctgatt tatagcgcgc gcgcggcggg cgcgtttggc gcgaaaatta
+      781 ccggcgcggg cggcggcggc tgcatggtgg cgctgaccgc gccggaaaaa tgcaaccagg
+      841 tggcggaagc ggtggcgggc gcgggcggca aagtgaccat taccaaaccg accgaacagg
+      901 gcctgaaagt ggattaacta atgagacc
+//

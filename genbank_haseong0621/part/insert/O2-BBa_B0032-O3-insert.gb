@@ -1,0 +1,26 @@
+LOCUS       O2-BBa_B0032-O3           44 bp    DNA              UNK 01-JAN-1980
+DEFINITION  Synthetic construct of O2-BBa_B0032-O3.
+ACCESSION   O2-BBa_B0032-O3
+VERSION     O2-BBa_B0032-O3
+KEYWORDS    .
+SOURCE      .
+  ORGANISM  .
+            .
+FEATURES             Location/Qualifiers
+     misc_feature    1..6
+                     /label="BsaI"
+     misc_feature    7
+                     /label="A"
+     misc_feature    8..11
+                     /label="O2"
+     misc_feature    12..33
+                     /label="BBa_B0032"
+     misc_feature    34..37
+                     /label="O3"
+     misc_feature    38
+                     /label="A"
+     misc_feature    39..44
+                     /label="BsaI"
+ORIGIN
+        1 ggtctcactt ttctagagtc acacaggaaa gtagcagtga gacc
+//

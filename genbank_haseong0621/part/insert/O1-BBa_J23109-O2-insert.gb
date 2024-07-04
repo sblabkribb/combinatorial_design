@@ -1,0 +1,26 @@
+LOCUS       O1-BBa_J23109-O2          57 bp    DNA              UNK 01-JAN-1980
+DEFINITION  Synthetic construct of O1-BBa_J23109-O2.
+ACCESSION   O1-BBa_J23109-O2
+VERSION     O1-BBa_J23109-O2
+KEYWORDS    .
+SOURCE      .
+  ORGANISM  .
+            .
+FEATURES             Location/Qualifiers
+     misc_feature    1..6
+                     /label="BsaI"
+     misc_feature    7
+                     /label="A"
+     misc_feature    8..11
+                     /label="O1"
+     misc_feature    12..46
+                     /label="BBa_J23109"
+     misc_feature    47..50
+                     /label="O2"
+     misc_feature    51
+                     /label="A"
+     misc_feature    52..57
+                     /label="BsaI"
+ORIGIN
+        1 ggtctcagcc ttttacagct agctcagtcc tagggactgt gctagccttt tgagacc
+//
