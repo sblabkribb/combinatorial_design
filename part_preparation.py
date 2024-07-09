@@ -261,6 +261,6 @@ def part_withvector_gibson(project_dir, vector_gbfile, target_feature="MCS"):
 
     # store primer list
     df = pd.DataFrame(primer_list)
-    df.to_csv(f"{project_dir}/primers-part-withvector-gibson.csv", index=False)
+    df.to_csv(f"{project_path}/primers-part-withvector-gibson.csv", index=False)
     
     print(f"Process completed. GenBank files have been created in the folder of {withvector_path}")
