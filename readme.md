@@ -1,8 +1,12 @@
 # Combinatorial Part Design
 
-
 - 부품/모듈 조합을 설계하고 genbank 및 fasta 파일 생성하는 프로그램
 - 설계는 엑셀로 (`assembly_design.xlsx`) 수행하고 이를 기반으로 genbank 및 fasta 파일을 생성
+
+# TODO
+
+- 다른 종류 vector 적용시 작동 확인 필요
+- excel file template 자동 저장
 
 ## 1. 사용법 간단한 설명
 - 임의의 폴더 위치에서 다음 입력 (command line)
@@ -62,8 +66,8 @@ vector_gbfile = "addgene-plasmid-50005-sequence-222046.gb"
 pprep.part_insert_goldengate(project_dir, design_file)
 ```
 
-    Process completed. GenBank files have been created in the folder of /home/haseong/dev/combinatorial_design/projects/haseong_240704/parts/insert
-
+    Process completed. GenBank files have been created in the folder of c:\mydocs\2024\dev\combinatorial_design\projects\haseong_240704\parts\insert
+    
 
 ### Inserting the part in a vector
 - Gibson을 활용한 insert - vector에 클로닝 (gbfile 얻기 위한 시뮬레이션)
@@ -83,8 +87,8 @@ reload(pprep)
 pprep.part_withvector_gibson(project_dir, vector_gbfile, "MCS")
 ```
 
-    Process completed. GenBank files have been created in the folder of /home/haseong/dev/combinatorial_design/projects/haseong_240704/parts/withvector
-
+    Process completed. GenBank files have been created in the folder of c:\mydocs\2024\dev\combinatorial_design\projects\haseong_240704\parts\withvector
+    
 
 ## 3-B. 모듈 설계 
 
@@ -134,7 +138,7 @@ module_linear = pasm.part_assembly_goldengate(project_dir, allcomb)
 ```
 
 
-<font face=monospace><a href='/home/haseong/dev/combinatorial_design/projects/haseong_240704/modules/inserts/VA8-BBa_J23106-BBa_B0032-IspA-L2U3H03-VA2.gb' target='_blank'>/home/haseong/dev/combinatorial_design/projects/haseong_240704/modules/inserts/VA8-BBa_J23106-BBa_B0032-IspA-L2U3H03-VA2.gb</a></font><br>
+<font face=monospace><a href='c:\mydocs\2024\dev\combinatorial_design\projects\haseong_240704\modules\inserts/VA8-BBa_J23106-BBa_B0032-IspA-L2U3H03-VA2.gb' target='_blank'>c:\mydocs\2024\dev\combinatorial_design\projects\haseong_240704\modules\inserts/VA8-BBa_J23106-BBa_B0032-IspA-L2U3H03-VA2.gb</a></font><br>
 
 
 ### 조합된 Linear DNA를 vector에 클로닝 Gibson assembly
@@ -152,7 +156,7 @@ module_withvector_list = pasm.build_module_withvector_gibson(project_dir, vector
 ```
 
 
-<font face=monospace><a href='/home/haseong/dev/combinatorial_design/projects/haseong_240704/modules/withvector/VA8-BBa_J23106-BBa_B0032-IspA-L2U3H03-VA2_withvector.gb' target='_blank'>/home/haseong/dev/combinatorial_design/projects/haseong_240704/modules/withvector/VA8-BBa_J23106-BBa_B0032-IspA-L2U3H03-VA2_withvector.gb</a></font><br>
+<font face=monospace><a href='c:\mydocs\2024\dev\combinatorial_design\projects\haseong_240704\modules\withvector/VA8-BBa_J23106-BBa_B0032-IspA-L2U3H03-VA2_withvector.gb' target='_blank'>c:\mydocs\2024\dev\combinatorial_design\projects\haseong_240704\modules\withvector/VA8-BBa_J23106-BBa_B0032-IspA-L2U3H03-VA2_withvector.gb</a></font><br>
 
 
 ## 3-C. 모듈 어셈블리 기반 다중 모듈 설계
@@ -178,7 +182,7 @@ assembly_linear_dict = masm.module_combinatorial_gibson_assembly(project_dir, de
 ```
 
 
-<font face=monospace><a href='/home/haseong/dev/combinatorial_design/projects/haseong_240704/pathways/inserts/MM2/MM2_0015.gb' target='_blank'>/home/haseong/dev/combinatorial_design/projects/haseong_240704/pathways/inserts/MM2/MM2_0015.gb</a></font><br>
+<font face=monospace><a href='c:\mydocs\2024\dev\combinatorial_design\projects\haseong_240704\pathways\inserts\MM2\MM2_0015.gb' target='_blank'>c:\mydocs\2024\dev\combinatorial_design\projects\haseong_240704\pathways\inserts\MM2\MM2_0015.gb</a></font><br>
 
 
 - 주어진 vector에 gibson으로 삽입한 상태의 circular DNA 제작
@@ -195,7 +199,7 @@ assembly_circular_dict = masm.module_comb_withvector_gibson_assembly(project_dir
 ```
 
 
-<font face=monospace><a href='/home/haseong/dev/combinatorial_design/projects/haseong_240704/pathways/withvector/MM2/MM2_0015_withvector.gb' target='_blank'>/home/haseong/dev/combinatorial_design/projects/haseong_240704/pathways/withvector/MM2/MM2_0015_withvector.gb</a></font><br>
+<font face=monospace><a href='c:\mydocs\2024\dev\combinatorial_design\projects\haseong_240704\pathways\withvector\MM2\MM2_0015_withvector.gb' target='_blank'>c:\mydocs\2024\dev\combinatorial_design\projects\haseong_240704\pathways\withvector\MM2\MM2_0015_withvector.gb</a></font><br>
 
 
 ## 3-D. 대사경로 조합
@@ -221,10 +225,9 @@ all_pathway_combination_list = masm.pathway_comb_withvector_gibson_assembly(proj
 ```
 
 
-<font face=monospace><a href='/home/haseong/dev/combinatorial_design/projects/haseong_240704/pathways/withvector/MM3/MM3_0010_withvector.gb' target='_blank'>/home/haseong/dev/combinatorial_design/projects/haseong_240704/pathways/withvector/MM3/MM3_0010_withvector.gb</a></font><br>
+<font face=monospace><a href='c:\mydocs\2024\dev\combinatorial_design\projects\haseong_240704\pathways\withvector\MM3\MM3_0010_withvector.gb' target='_blank'>c:\mydocs\2024\dev\combinatorial_design\projects\haseong_240704\pathways\withvector\MM3\MM3_0010_withvector.gb</a></font><br>
 
 
+- 최종 7개 유전자 조합, 11kbp vector map 자동 완성
 
-```python
-all_pathway_combination_list[0].list_features()
-```
+![alt text](images/pathway_final.png)
