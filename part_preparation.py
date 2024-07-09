@@ -29,7 +29,7 @@ def part_insert_goldengate(project_dir, design_file):
     genbank_path = os.path.join(current_path, os.getenv("GENBANK_DIR"))
     part_path = os.path.join(project_path, os.getenv("PART_DIR"))
     insert_path = os.path.join(part_path, "insert")
-    design_file_path = os.path.join(project_dir, design_file)
+    design_file_path = os.path.join(project_path, design_file)
     part_dbfile_path = os.path.join(genbank_path, os.getenv("PART_DB_FILE"))
 
 
