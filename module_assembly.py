@@ -145,7 +145,7 @@ def module_combinatorial_gibson_assembly(project_dir, design_file, homologous_si
         assembly_dictionary[row.iloc[0]] = assembly_list
 
     ## write combinatorial list to a json file
-    with open(os.path.join(current_path, project_dir, "module_combinatorial_list.json"), "w") as f:
+    with open(os.path.join(current_path, project_path, "module_combinatorial_list.json"), "w") as f:
         json.dump(combinatorial_list, f)
         
     return assembly_dictionary

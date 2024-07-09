@@ -220,26 +220,33 @@ def part_withvector_gibson(project_dir, vector_gbfile, target_feature="MCS"):
         # print(type(new_construct))
         
 
-        ## make correction of feature location
-        ## this is because the feature shift not applied by pydna
-        updated_primer = fragment_list[1].forward_primer.seq
-        org_primer = insert_amp.forward_primer.seq
-        shift_len = len(updated_primer) - len(org_primer) 
-        # print(f"length to shift: {shift_len}")
+        ## i don't know why, but the feature location is not correct in linux environment
+        if os.name == 'posix':
+            ## make correction of feature location
+            ## this is because the feature shift not applied by pydna
+            updated_primer = fragment_list[1].forward_primer.seq
+            org_primer = insert_amp.forward_primer.seq
+            shift_len = len(updated_primer) - len(org_primer) 
+            # print(f"length to shift: {shift_len}")
 
-        insert_pos = get_positions_by_label(new_construct, ["insert_forward"])
-        # print(insert_pos)
+            insert_pos = get_positions_by_label(new_construct, ["insert_forward"])
+            # print(insert_pos)
 
-        # shift all the feature locations from the insert position start
-        for feature in new_construct.features:
-            if feature.location.start >= insert_pos['start']:
-                # print the direction
-                strand = feature.location.strand
-                # shift the location
-                feature.location = FeatureLocation(start = feature.location.start + shift_len, end = feature.location.end + shift_len)
-                # print the direction
-                feature.location.strand = strand
-            
+            # print(new_construct.list_features())
+            # new_construct.write("test1.gb")
+            # shift all the feature locations from the insert position start
+            for feature in new_construct.features:
+                if feature.location.start >= insert_pos['start']:
+                    # print the direction
+                    strand = feature.location.strand
+                    # shift the location
+                    feature.location = FeatureLocation(start = feature.location.start + shift_len, end = feature.location.end + shift_len)
+                    # print the direction
+                    feature.location.strand = strand
+
+            # print(new_construct.list_features())         
+            # new_construct.write("test2.gb")
+    
         # compare all the pairs of features to check the duplication of features. remove all the duplicated features except the first one
         # print(new_construct.list_features())
         feature_duplication = [False] * len(new_construct.features)
