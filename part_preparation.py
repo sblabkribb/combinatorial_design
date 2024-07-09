@@ -253,8 +253,6 @@ def part_withvector_gibson(project_dir, vector_gbfile, target_feature="MCS"):
         # print(new_construct.list_features())
         # change the file name to -withvector
         gb_filename = f"{fn.split(os.sep)[-1].replace('-insert.gb', '-withvector.gb')}"
-        print(gb_filename)
-        return
         # gb_filename = f"{fn.split('/')[-1].replace('-insert.gb', '-withvector.gb')}"
         # store the withvector construct
         new_construct.write(f"{withvector_path}/{gb_filename}")
