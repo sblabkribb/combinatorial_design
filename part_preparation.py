@@ -2,6 +2,8 @@ import pandas as pd
 import os
 import glob
 import pathlib
+from dotenv import load_dotenv
+load_dotenv()
 
 from Bio import SeqIO
 from Bio.Seq import Seq
@@ -17,33 +19,45 @@ from pydna.common_sub_strings import terminal_overlap
 
 from IPython.display import clear_output
 
-def part_insert_prep_goldengate(genbank_dir, part_prep_file, part_db_file):
+## prepare parts for golden gate assembly ready
+def part_insert_goldengate(project_dir, design_file):
     
     """ Generate GenBank files for inserts """
-    current_dir = pathlib.Path(__file__).parent.absolute()
-    genbank_dir = os.path.join(current_dir, genbank_dir)
-    insert_dir = os.path.join(genbank_dir, "part", "insert")
-    part_prep_path = os.path.join(current_dir, part_prep_file)
-    part_db_path = os.path.join(current_dir, part_db_file)
+    current_path= pathlib.Path(__file__).parent.absolute()
+    project_common_path = os.path.join(current_path, os.getenv("PROJECT_DIR"))
+    project_path = os.path.join(project_common_path, project_dir)
+    genbank_path = os.path.join(current_path, os.getenv("GENBANK_DIR"))
+    part_path = os.path.join(project_path, os.getenv("PART_DIR"))
+    insert_path = os.path.join(part_path, "insert")
+    design_file_path = os.path.join(project_dir, design_file)
+    part_dbfile_path = os.path.join(genbank_path, os.getenv("PART_DB_FILE"))
 
-    if not os.path.exists(genbank_dir):
-        os.makedirs(genbank_dir)
 
-    if not os.path.exists(insert_dir):
-        os.makedirs(insert_dir)
+    if not os.path.exists(project_common_path):
+        os.makedirs(project_common_path)
+
+    if not os.path.exists(project_path):
+        os.makedirs(project_path)
+
+    if not os.path.exists(part_path):
+        os.makedirs(part_path)
+
+    ## create the folder for the insert
+    if not os.path.exists(insert_path):
+        os.makedirs(insert_path)
 
     # load part design file
-    part_data = pd.read_excel(part_prep_path)
+    part_data = pd.read_excel(design_file_path)
     # print(part_data.head())
     # exit
 
     part_data['id'] = part_data['id'].ffill()
 
     # load part database 
-    part_sheets = pd.ExcelFile(part_db_path).sheet_names
-    sequences = {sheet: pd.read_excel(part_db_path, sheet_name=sheet) for sheet in part_sheets}
+    part_sheets = pd.ExcelFile(part_dbfile_path).sheet_names
+    sequences = {sheet: pd.read_excel(part_dbfile_path, sheet_name=sheet) for sheet in part_sheets}
 
-    # Process each module
+    
     for id in part_data['id'].unique():
         parts = part_data[part_data['id'] == id]
         combined_sequence = ""
@@ -56,10 +70,8 @@ def part_insert_prep_goldengate(genbank_dir, part_prep_file, part_db_file):
             # print(part_row['name'], part_row['type'])
             part_info = sequences[part_row['type']]
             # print("partinfo:", part_info.head())
-            # print()
             seq = part_info.loc[part_info['Name'] == part_row['name'], 'Sequence'].iloc[0]
             # print("part_info name:", part_info['Name'], "part_row name:", part_row['name'])
-            # print()
             # print(seq)
 
             if part_row['strand'] == '-':
@@ -71,11 +83,7 @@ def part_insert_prep_goldengate(genbank_dir, part_prep_file, part_db_file):
             start = end
 
         # Define the GenBank file path
-        genbank_path = f'{insert_dir}/{id}-insert.gb'
-
-        # Check if the GenBank file already exists
-        # if os.path.exists(genbank_path):
-            # print(f"Warning: The file '{genbank_path}' already exists. It will be overwritten.")
+        genbank_path = f'{insert_path}/{id}-insert.gb'
 
         # Create the SeqRecord
         seq_record = SeqRecord(Seq(combined_sequence), id=id, name=id, description=f"Synthetic construct of {id}")
@@ -87,8 +95,7 @@ def part_insert_prep_goldengate(genbank_dir, part_prep_file, part_db_file):
         # Write to GenBank file
         SeqIO.write(seq_record, genbank_path, 'genbank')
 
-    print(f"Process completed. GenBank files have been created in the folder of {insert_dir}")
-
+    print(f"Process completed. GenBank files have been created in the folder of {insert_path}")
 
 # Search by label and return the location
 def get_positions_by_label(record, labels):
@@ -106,31 +113,36 @@ def get_positions_by_label(record, labels):
     else:
         return {'start': None, 'end': None}
 
+## Clone the part insert into a vector using Gibson assembly
+def part_withvector_gibson(project_dir, vector_gbfile, target_feature="MCS"):
 
-def part_withvector_prep_gibson(project_dir, vector_gbfile):
+    current_path= pathlib.Path(__file__).parent.absolute()
+    project_common_path = os.path.join(current_path, os.getenv("PROJECT_DIR"))
+    project_path = os.path.join(project_common_path, project_dir)
+    genbank_path = os.path.join(current_path, os.getenv("GENBANK_DIR"))
+    part_path = os.path.join(project_path, os.getenv("PART_DIR"))
+    insert_path = os.path.join(part_path, "insert")
+    vector_file_path = os.path.join(genbank_path, vector_gbfile)
+    withvector_path = os.path.join(part_path, "withvector")
 
-    # current directory
-    current_dir = pathlib.Path(__file__).parent.absolute()
-    project_dir = os.path.join(current_dir, project_dir)
-    # print(current_dir)
-    current_vector_path = f"{current_dir}/{vector_gbfile}"
-    insert_path = os.path.join(project_dir, "part", "insert")
-    withvector_path = os.path.join(project_dir, "part", "withvector")
+    if not os.path.exists(project_path):
+        ## warning no project directory
+        print(f"Warning: The project directory '{project_path}' does not exist.")
+        return
 
     ## create the folder for the withvector construct
     if not os.path.exists(f"{withvector_path}"):
         os.makedirs(f"{withvector_path}")
 
-
     # read genbank file
-    puc19 = read(current_vector_path)
+    puc19 = read(vector_file_path)
 
     # no support vector linearization by PCR so cur first and PCR later
     # linearize by enzyme first and then do PCR (simulation only)
     tmp_vector = puc19.linearize(HincII)
     # print(tmp_vector.figure())
     # get primers for vector
-    mcs_pos = get_positions_by_label(puc19, ["MCS"])
+    mcs_pos = get_positions_by_label(puc19, [target_feature])
     vector_linear_frag1 = puc19[:mcs_pos['start']]
     vector_linear_frag2 = puc19[mcs_pos['end']:] 
     vfwd1, vrev1 = create(str(vector_linear_frag1.seq))
@@ -194,14 +206,6 @@ def part_withvector_prep_gibson(project_dir, vector_gbfile):
             primer_list.append({"target": "vector", "direction": "foward", "sequence": str(fragment_list[0].forward_primer.seq), "tm": mt.Tm_NN(fragment_list[0].forward_primer.seq), "length": len(fragment_list[0].forward_primer.seq)})
             primer_list.append({"target": "vector", "direction": "reverse", "sequence": str(fragment_list[0].reverse_primer.seq), "tm": mt.Tm_NN(fragment_list[0].reverse_primer.seq), "length": len(fragment_list[0].reverse_primer.seq)})
 
-        # this is the way suggesting by the author but..
-        # fragment_list = assembly_fragments((vector, insert_amp, vector))
-        # fragment_list = fragment_list[:-1]
-        # fragment_list = [vector, insert_amp]
-        # asm = Assembly(fragment_list)
-        # print(fragment_list[0].figure())
-        # print(fragment_list[1].figure())
-
         asm = Assembly(fragment_list, algorithm=terminal_overlap)
         candidate = asm.assemble_circular()
         # print(f"total candidates: {len(candidate)}")
@@ -226,7 +230,7 @@ def part_withvector_prep_gibson(project_dir, vector_gbfile):
         insert_pos = get_positions_by_label(new_construct, ["insert_forward"])
         # print(insert_pos)
 
-        # # shift all the feature locations from the insert position start
+        # shift all the feature locations from the insert position start
         for feature in new_construct.features:
             if feature.location.start >= insert_pos['start']:
                 # print the direction
@@ -235,13 +239,21 @@ def part_withvector_prep_gibson(project_dir, vector_gbfile):
                 feature.location = FeatureLocation(start = feature.location.start + shift_len, end = feature.location.end + shift_len)
                 # print the direction
                 feature.location.strand = strand
+            
+        # compare all the pairs of features to check the duplication of features. remove all the duplicated features except the first one
+        # print(new_construct.list_features())
+        feature_duplication = [False] * len(new_construct.features)
+        for i in range(len(new_construct.features)):
+            for j in range(i+1, len(new_construct.features)):
+                if new_construct.features[i].location.start == new_construct.features[j].location.start and new_construct.features[i].location.end == new_construct.features[j].location.end:
+                    feature_duplication[j] = True
+        new_construct.features = [new_construct.features[i] for i in range(len(new_construct.features)) if not feature_duplication[i]]
+        # print(new_construct.list_features())
                 
-
         # print(new_construct.list_features())
         # change the file name to -withvector
         gb_filename = f"{fn.split('/')[-1].replace('-insert.gb', '-withvector.gb')}"
         # print(gb_filename)
-        # break
         # store the withvector construct
         new_construct.write(f"{withvector_path}/{gb_filename}")
         clear_output(wait=True)
@@ -249,6 +261,6 @@ def part_withvector_prep_gibson(project_dir, vector_gbfile):
 
     # store primer list
     df = pd.DataFrame(primer_list)
-    df.to_csv(f"{project_dir}/partinsert-vector-gibson-primers.csv", index=False)
+    df.to_csv(f"{project_dir}/primers-part-withvector-gibson.csv", index=False)
     
     print(f"Process completed. GenBank files have been created in the folder of {withvector_path}")

@@ -16,11 +16,16 @@ from Bio.Restriction import HincII, BsaI
 from Bio.SeqFeature import SeqFeature, FeatureLocation
 from Bio.SeqUtils import MeltingTemp as mt
 
-def module_combinatorial_gibson_assembly(project_dir, path_design_file, vector_gbpath, homo="VA"):
-    current_path = os.path.dirname(os.path.realpath(__file__))
-    pathway_path = os.path.join(current_path, project_dir, "pathway")
-    pathway_insert_path = os.path.join(pathway_path, "insert")
-    vector_path = os.path.join(current_path, vector_gbpath) 
+def module_combinatorial_gibson_assembly(project_dir, design_file, homologous_site="VA"):
+    
+    current_path= pathlib.Path(__file__).parent.absolute()
+    # genbank_path = os.path.join(current_path, os.getenv("GENBANK_DIR"))
+    project_common_path = os.path.join(current_path, os.getenv("PROJECT_DIR"))
+    project_path = os.path.join(project_common_path, project_dir)
+    pathway_path = os.path.join(project_path, os.getenv("PATHWAY_DIR"))
+    pathway_insert_path = os.path.join(pathway_path, "inserts")
+    module_path = os.path.join(project_path, os.getenv("MODULE_DIR"))
+    module_withvector_path = os.path.join(module_path, "withvector")
     # print(pathway_path)
 
     if not os.path.exists(pathway_path):
@@ -29,9 +34,7 @@ def module_combinatorial_gibson_assembly(project_dir, path_design_file, vector_g
     if not os.path.exists(pathway_insert_path):
         os.makedirs(pathway_insert_path)
 
-    module_withvector_path = os.path.join(project_dir, "module", "withvector")
-    ## read design excel file
-    df = pd.read_excel(path_design_file)
+    df = pd.read_excel(design_file, sheet_name="multi-module")
     # print(df)
     
     ## genbank file list from module/withvector
@@ -44,9 +47,9 @@ def module_combinatorial_gibson_assembly(project_dir, path_design_file, vector_g
     for row in df.iterrows():
         ## convert row to series
         row = row[1].dropna()
-        print(row[0], "...")
+        # print(row[0], "...")
 
-        pathway_mm_path = os.path.join(pathway_insert_path, row[0])
+        pathway_mm_path = os.path.join(pathway_insert_path, row.iloc[0])
 
         if not os.path.exists(pathway_mm_path):
             os.makedirs(pathway_mm_path)
@@ -89,7 +92,7 @@ def module_combinatorial_gibson_assembly(project_dir, path_design_file, vector_g
                 for feature in record.features:
                     ## features which labels starting with "VA"
                     # print(feature.qualifiers["label"][0])
-                    if feature.qualifiers["label"][0].startswith("VA"):
+                    if feature.qualifiers["label"][0].startswith(homologous_site):
                         va_list.append(feature.qualifiers["label"][0])
                 # print(va_list)
                 # print(record.list_features())
@@ -113,23 +116,33 @@ def module_combinatorial_gibson_assembly(project_dir, path_design_file, vector_g
             asm = Assembly(amp_list, algorithm = terminal_overlap)
             # print(asm)
             candidate = asm.assemble_linear()
+
+            # compare all the pairs of features to check the duplication of features. remove all the duplicated features except the first one
+            feature_duplication = [False] * len(candidate[0].features)
+            for i in range(len(candidate[0].features)):
+                for j in range(i+1, len(candidate[0].features)):
+                    if candidate[0].features[i].location.start == candidate[0].features[j].location.start and candidate[0].features[i].location.end == candidate[0].features[j].location.end:
+                        feature_duplication[j] = True
+            candidate[0].features = [candidate[0].features[i] for i in range(len(candidate[0].features)) if not feature_duplication[i]]
+            # print(candidate[0].list_features())
+
             # print(len(candidate))
             # print(candidate[0].figure())
             # print(candidate.list_features())
             ## make 0 lead string for combi
             combistr = str(combi).zfill(4)
             
-            candidate[0].name = row[0]+"_"+combistr
+            candidate[0].name = row.iloc[0]+"_"+combistr
             assembly_list.append(candidate[0])
 
             # write the assembled sequence to a genbank file
             # fname = f"{'_'.join(comb).replace('_withvector.gb', '')}.gb"
             # print(fname)
-            combinatorial_list[row[0]+"_"+combistr] = comb
+            combinatorial_list[row.iloc[0]+"_"+combistr] = comb
             # print(candidate[0].seq)
             candidate[0].write(os.path.join(pathway_mm_path, candidate[0].name + ".gb"))
             clear_output(wait=True)
-        assembly_dictionary[row[0]] = assembly_list
+        assembly_dictionary[row.iloc[0]] = assembly_list
 
     ## write combinatorial list to a json file
     with open(os.path.join(current_path, project_dir, "module_combinatorial_list.json"), "w") as f:
@@ -140,20 +153,29 @@ def module_combinatorial_gibson_assembly(project_dir, path_design_file, vector_g
 
 
 
-def module_comb_withvector_gibson_assembly(project_dir, vector_gbpath, linear_insert_dic):
+def module_comb_withvector_gibson_assembly(project_dir, vector_gbfile, linear_insert_dic):
 
-    current_path = os.path.dirname(os.path.realpath(__file__))
-    project_path = os.path.join(current_path, project_dir)
-    pathway_path = os.path.join(project_path, "pathway")
+    current_path= pathlib.Path(__file__).parent.absolute()
+    genbank_path = os.path.join(current_path, os.getenv("GENBANK_DIR"))
+    vector_file_path = os.path.join(genbank_path, vector_gbfile)
+    project_common_path = os.path.join(current_path, os.getenv("PROJECT_DIR"))
+    project_path = os.path.join(project_common_path, project_dir)
+    pathway_path = os.path.join(project_path, os.getenv("PATHWAY_DIR"))
+    pathway_insert_path = os.path.join(pathway_path, "inserts")
     pathway_withvector_path = os.path.join(pathway_path, "withvector")
-    vector_path = os.path.join(current_path, vector_gbpath) 
+
+    if not os.path.exists(pathway_path):
+        os.makedirs(pathway_path)
+        
+    if not os.path.exists(pathway_insert_path):
+        os.makedirs(pathway_insert_path)
 
     if not os.path.exists(pathway_withvector_path):
         os.makedirs(pathway_withvector_path)
         
     ## ---- assume puc19, need to change if you use other vector ---- ##
     ## read the vector file
-    puc19 = read(vector_path)
+    puc19 = read(vector_file_path)
 
     # no support vector linearization by PCR so cur first and PCR later
     # linearize by enzyme first and then do PCR (simulation only)
@@ -259,7 +281,7 @@ def module_comb_withvector_gibson_assembly(project_dir, vector_gbpath, linear_in
             assembly_list.append(candidate[0])
         assembly_dictionary[module_name] = assembly_list
 
-    primer_fname = "pathway_primers.csv"
+    primer_fname = "primers_multi_modules.csv"
     primer_df = pd.DataFrame(primer_list)
     primer_df.to_csv(os.path.join(project_path, primer_fname), index = False)
 
@@ -274,25 +296,28 @@ def module_comb_withvector_gibson_assembly(project_dir, vector_gbpath, linear_in
     
 
 
-def pathway_comb_withvector_gibson_assembly(project_dir, path_design_file, vector_gbpath, linear_insert_dict):
+def pathway_comb_withvector_gibson_assembly(project_dir, design_file, vector_gbfile, linear_insert_dict):
 
-    current_path = os.path.dirname(os.path.realpath(__file__))
-    project_path = os.path.join(current_path, project_dir)
-    pathway_path = os.path.join(project_path, "pathway")
+    current_path= pathlib.Path(__file__).parent.absolute()
+    genbank_path = os.path.join(current_path, os.getenv("GENBANK_DIR"))
+    vector_file_path = os.path.join(genbank_path, vector_gbfile)
+    project_common_path = os.path.join(current_path, os.getenv("PROJECT_DIR"))
+    project_path = os.path.join(project_common_path, project_dir)
+    pathway_path = os.path.join(project_path, os.getenv("PATHWAY_DIR"))
     pathway_withvector_path = os.path.join(pathway_path, "withvector")
-    vector_path = os.path.join(current_path, vector_gbpath) 
+
 
     if not os.path.exists(pathway_withvector_path):
         os.makedirs(pathway_withvector_path)
         
     ## read design excel file from the second sheet
-    df = pd.read_excel(path_design_file, sheet_name=1)
+    df = pd.read_excel(design_file, sheet_name="pathway")
 
     ## for each row in the design file, find the corresponding genbank information from linear_insert_dict
     for row in df.iterrows():
         ## convert row to series
         row = row[1].dropna()
-        module_id = row[0]
+        module_id = row.iloc[0]
         print(module_id, "...")
         
         pathway_mm_path = os.path.join(pathway_withvector_path, module_id)
@@ -305,7 +330,7 @@ def pathway_comb_withvector_gibson_assembly(project_dir, path_design_file, vecto
 
     ## ---- assume puc19, need to change if you use other vector ---- ##
     ## read the vector file
-    puc19 = read(vector_path)
+    puc19 = read(vector_file_path)
 
     # no support vector linearization by PCR so cur first and PCR later
     # linearize by enzyme first and then do PCR (simulation only)
@@ -438,7 +463,7 @@ def pathway_comb_withvector_gibson_assembly(project_dir, path_design_file, vecto
 
         assembly_list_final.append(candidate[0])
 
-    primer_fname = "multi_pathway_primers.csv"
+    primer_fname = "primers_pathway.csv"
     primer_df = pd.DataFrame(primer_list)
     primer_df.to_csv(os.path.join(project_path, primer_fname), index = False)
 
