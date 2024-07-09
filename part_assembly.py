@@ -15,14 +15,24 @@ from Bio.SeqUtils import MeltingTemp as mt
 from IPython.display import clear_output
 
 
-def get_part_combinations(design_file):
+def get_all_possible_combinations(project_dir, design_file):
 
-    ## current path
-    current_path = os.path.dirname(os.path.realpath(__file__))
+    current_path= pathlib.Path(__file__).parent.absolute()
+    project_common_path = os.path.join(current_path, os.getenv("PROJECT_DIR"))
+    project_path = os.path.join(project_common_path, project_dir)
+    part_path = os.path.join(project_path, os.getenv("PART_DIR"))
+    withvector_path = os.path.join(part_path, "withvector")
+    withvector_files = os.listdir(withvector_path)
+    design_file_path = os.path.join(project_path, design_file)
 
-    assembly_design_path = f"{current_path}/{design_file}"
+
+    ## if no design file exist, warning and stop
+    if not os.path.exists(design_file_path):
+        print(f"Design file {design_file} does not exist!\nIf this is the first time to run, please copy 'assembly_design.xlsx' file in the root folder to your project directory \nand update the file with appropriate design you want")
+        return None
+
     # Load the Excel file
-    df = pd.read_excel(assembly_design_path)
+    df = pd.read_excel(design_file_path, sheet_name='module')
     df['id'] = df['id'].ffill()
 
     # for those that have the same id
@@ -43,17 +53,13 @@ def get_part_combinations(design_file):
         
         new_part_types = [] 
         for i,part_type in enumerate(part_types):
-        # for part_type in part_types:
             # Collect all non-null items for each type across all relevant columns
             # tries to 
             new_type = part_type+"_"+str(i)
             new_part_types.append(new_type)
             parts_by_type[new_type] = parts.iloc[i]["name":].values.flatten()
             # print(parts.loc[parts['type'] == part_type, 'name':].values.flatten())
-            # parts_by_type[part_type] = parts.loc[parts['type'] == part_type, 'name':].values.flatten()
             parts_by_type[new_type] = [part for part in parts_by_type[new_type] if pd.notna(part)]
-
-        # print(parts_by_type)
 
         # Generate all combinations of the specified part types
         all_combinations = list(product(*[parts_by_type[new_type] for new_type in new_part_types]))
@@ -65,18 +71,6 @@ def get_part_combinations(design_file):
             dictionaries.append(dictionary)
 
         combinations.extend(dictionaries)
-
-    return combinations
-
-
-## assembly the parts from all the combinations of the list
-def get_all_possible_combinations(project_dir, combinations):
-    
-    ## list all the parts in the withvector directory
-    current_path = os.path.dirname(os.path.realpath(__file__))
-    withvector_path = os.path.join(current_path, project_dir, "part", "withvector")
-    withvector_files = os.listdir(withvector_path)
-    # print(withvector_files)
     
     # a dictionary of all the combinations
     all_combinations = {}
@@ -105,34 +99,28 @@ def get_all_possible_combinations(project_dir, combinations):
         index_key = "-".join([part_name for part_name in combination.values()])
         # print(index_key)
         # the length of index_key should be the same as the number of part combinations specified in the excel file
-         
+
         # Generate all combinations of the specified gb files
         all_combinations[index_key] = (list(product(*[combination_dict[part_type] for part_type in combination_dict])))
 
-
-    return all_combinations
-
-
-def filtering_combinations(all_combination_list):
-    
     ## all possible combinations with a two column list
     # transform the dictionary into a list with two columns "key" and "value"
     # if value is a list, then expand the list
-    all_combinations = []
-    for key, value in all_combination_list.items():
+    all_combination_list = []
+    for key, value in all_combinations.items():
         if isinstance(value, list):
             for item in value:
-                all_combinations.append([key, item])
+                all_combination_list.append([key, item])
         else:
-            all_combinations.append([key, value])
+            all_combination_list.append([key, value])
     
     ## filtering out if its overhang junction is not the same between two parts
     filteredList = {}
 
-    for i in range(len(all_combinations)): 
+    for i in range(len(all_combination_list)): 
         ## seperate the list into two groups where one is 0 to len-1 and the other is 1 to len
-        group1 = all_combinations[i][1][:-1]
-        group2 = all_combinations[i][1][1:]
+        group1 = all_combination_list[i][1][:-1]
+        group2 = all_combination_list[i][1][1:]
         # print(group1)
         ## separate each items with "-" in the groups
         overhang1 = [s.replace("-withvector.gb", "").split("-")[-1] for s in group1]
@@ -141,21 +129,26 @@ def filtering_combinations(all_combination_list):
         # print(overhang2)
         ## then compare the overhang junctions between two parts
         if(overhang1 == overhang2):
-            filteredList[all_combinations[i][0]]=all_combinations[i][1]
+            filteredList[all_combination_list[i][0]]=all_combination_list[i][1]
             # go for the assembly
 
     return filteredList
 
 
 def part_assembly_goldengate(project_dir, filtered_combinations):
-    # current directory
-    current_dir = pathlib.Path(__file__).parent.absolute()
-    withvector_path = os.path.join(current_dir, project_dir, "part", "withvector") 
-    module_dir = os.path.join(current_dir, project_dir, "module")
-    module_insert_dir = os.path.join(module_dir, "inserts")
 
-    if not os.path.exists(module_dir):
-        os.makedirs(module_dir)
+    current_path= pathlib.Path(__file__).parent.absolute()
+    project_common_path = os.path.join(current_path, os.getenv("PROJECT_DIR"))
+    project_path = os.path.join(project_common_path, project_dir)
+    part_path = os.path.join(project_path, os.getenv("PART_DIR"))
+    withvector_path = os.path.join(part_path, "withvector")
+    # withvector_files = os.listdir(withvector_path)
+
+    module_path = os.path.join(project_path, os.getenv("MODULE_DIR"))
+    module_insert_dir = os.path.join(module_path, "inserts")
+
+    if not os.path.exists(module_path):
+        os.makedirs(module_path)
 
     if not os.path.exists(module_insert_dir):
         os.makedirs(module_insert_dir)
@@ -225,6 +218,7 @@ def part_assembly_goldengate(project_dir, filtered_combinations):
                 end = feature.location.end
                 feature.location = FeatureLocation(start = start - min_pos , end = end - min_pos , strand = strand)
 
+                
             # print(insert_amp.list_features())
             # print(insert_amp.program())
             insert_amp_cut = insert_amp.cut(BsaI)
@@ -246,6 +240,15 @@ def part_assembly_goldengate(project_dir, filtered_combinations):
         # print(candidate[0].figure())
         # print(candidate[0].list_features())
 
+        # compare all the pairs of features to check the duplication of features. remove all the duplicated features except the first one
+        feature_duplication = [False] * len(candidate[0].features)
+        for i in range(len(candidate[0].features)):
+            for j in range(i+1, len(candidate[0].features)):
+                if candidate[0].features[i].location.start == candidate[0].features[j].location.start and candidate[0].features[i].location.end == candidate[0].features[j].location.end:
+                    feature_duplication[j] = True
+        candidate[0].features = [candidate[0].features[i] for i in range(len(candidate[0].features)) if not feature_duplication[i]]
+        # print(candidate[0].list_features())
+
         ## write the candidate to the module "insert" directory
         fname = f"{module_insert_dir}/{key}.gb"
         candidate[0].write(fname)
@@ -257,20 +260,24 @@ def part_assembly_goldengate(project_dir, filtered_combinations):
 
     
 
-def build_module_withvector_gibson(project_dir, vector_gbpath, module_linear):
+def build_module_withvector_gibson(project_dir, vector_gbfile, module_linear):
     # current directory
-    current_dir = pathlib.Path(__file__).parent.absolute()
-    vector_path = os.path.join(current_dir, vector_gbpath) 
-    module_dir = os.path.join(current_dir, project_dir, "module")
-    module_insert_dir = os.path.join(module_dir, "inserts")
-    module_withvector_dir = os.path.join(module_dir, "withvector")
 
-    if not os.path.exists(module_withvector_dir):
-        os.makedirs(module_withvector_dir)
+    current_path= pathlib.Path(__file__).parent.absolute()
+    genbank_path = os.path.join(current_path, os.getenv("GENBANK_DIR"))
+    vector_file_path = os.path.join(genbank_path, vector_gbfile)
+    project_common_path = os.path.join(current_path, os.getenv("PROJECT_DIR"))
+    project_path = os.path.join(project_common_path, project_dir)
+    module_path = os.path.join(project_path, os.getenv("MODULE_DIR"))
+    module_insert_path = os.path.join(module_path, "inserts")
+    module_withvector_path = os.path.join(module_path, "withvector")
+
+    if not os.path.exists(module_withvector_path):
+        os.makedirs(module_withvector_path)
     
     ## ---- assume puc19, need to change if you use other vector ---- ##
     ## read the vector file
-    puc19 = read(vector_path)
+    puc19 = read(vector_file_path)
 
     # no support vector linearization by PCR so cur first and PCR later
     # linearize by enzyme first and then do PCR (simulation only)
@@ -296,7 +303,7 @@ def build_module_withvector_gibson(project_dir, vector_gbpath, module_linear):
     # print(vector.list_features())
 
     ## read all the genbank files in the module_insert_dir
-    module_insert_files = os.listdir(module_insert_dir)
+    module_insert_files = os.listdir(module_insert_path)
     # print(module_insert_files)
 
     candidates = []
@@ -358,13 +365,13 @@ def build_module_withvector_gibson(project_dir, vector_gbpath, module_linear):
         # print(candidate[0].figure())
         # print(candidate[0].list_features())
 
-        fname = f"{module_withvector_dir}/{os.path.basename(module_linear_file).replace('.gb', '')}_withvector.gb"
+        fname = f"{module_withvector_path}/{os.path.basename(module_linear_file).replace('.gb', '')}_withvector.gb"
         candidate[0].write(fname)
         clear_output(wait=True)
 
         candidates.append(candidate[0])
 
-    primer_fname = f"{module_dir}/module_primers.csv"
+    primer_fname = f"{module_path}/primers_module.csv"
     primer_df = pd.DataFrame(primer_list)
     primer_df.to_csv(primer_fname, index = False)
 
