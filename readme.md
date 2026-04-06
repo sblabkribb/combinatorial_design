@@ -1,12 +1,418 @@
-# Combinatorial Part Design
+# Combinatorial Design Microservice
 
-- 부품/모듈 조합을 설계하고 genbank 및 fasta 파일 생성하는 프로그램
-- 설계는 엑셀로 (`assembly_design.xlsx`) 수행하고 이를 기반으로 genbank 및 fasta 파일을 생성
+FastAPI 기반 DNA 조합 어셈블리 설계 마이크로서비스.  
+Part 서열 + Module 설계를 입력받아 GoldenGate / Gibson 어셈블리 시뮬레이션을 수행하고 결과를 JSON + GenBank(base64)로 반환합니다.
 
-# TODO
+Partbank26(`partbank26/backend`)에서 HTTP로 호출되며, Docker Compose로 독립 컨테이너(`combinatorial`)로 실행됩니다.
 
-- 다른 종류 vector 적용시 작동 확인 필요
-- excel file template 자동 저장
+---
+
+## 목차
+
+1. [아키텍처](#아키텍처)
+2. [빠른 시작 (Docker)](#빠른-시작-docker)
+3. [API 레퍼런스](#api-레퍼런스)
+4. [GoldenGate 어셈블리 로직](#goldengate-어셈블리-로직)
+5. [오류 / 경고 메시지 해설](#오류--경고-메시지-해설)
+6. [Partbank26 연동](#partbank26-연동)
+7. [테스트](#테스트)
+8. [주요 변경 이력](#주요-변경-이력)
+9. [레거시 사용법 (Jupyter 스크립트)](#레거시-사용법-jupyter-스크립트)
+
+---
+
+## 아키텍처
+
+```
+Partbank26 Backend (FastAPI :8000)
+    └─ POST /api/v1/combinatorial/run
+           │  part_ids → DB 조회 → 서열 resolve
+           ▼
+Combinatorial Microservice (FastAPI :8001)
+    └─ POST /run
+           │
+           ├─ [GoldenGate] prepare_goldengate_fragments()
+           │      파트별 BsaI 사이트 감지 / 래핑
+           │
+           ├─ filter_combinations_by_overhang()
+           │      인접 슬롯 오버행 일치 여부로 조합 필터링
+           │
+           └─ assemble_goldengate()
+                  BsaI 절단 → pydna Assembly → circular/linear
+                  결과: sequence, GenBank(base64), primers, features
+```
+
+**핵심 라이브러리**
+- `pydna` 5.2.0 — DNA 조립 시뮬레이션 (`Assembly`, `terminal_overlap`, `cut`)
+- `biopython` 1.84 — 서열 처리, GenBank I/O, 제한효소(`BsaI`)
+- `primers` 0.5.10 — 프라이머 설계
+
+---
+
+## 빠른 시작 (Docker)
+
+### 사전 요구사항
+
+- `assets/pUC19.gb` — 기본 벡터 파일 (없으면 모든 요청에 `vector_sequence` 필수)
+
+### 개발 환경 실행
+
+```bash
+# partbank26 루트에서
+docker compose -f docker-compose.dev.yml up combinatorial -d
+
+# 재빌드 (api.py 변경 후)
+bash scripts/rebuild-combinatorial.sh
+```
+
+### 헬스체크
+
+```bash
+curl http://localhost:8001/health
+# {"status": "ok"}
+```
+
+---
+
+## API 레퍼런스
+
+### `GET /health`
+
+서비스 상태 확인.
+
+**Response**
+```json
+{"status": "ok"}
+```
+
+---
+
+### `POST /run`
+
+조합 어셈블리 시뮬레이션 실행.
+
+#### Request Body
+
+```json
+{
+  "project_name": "string",
+  "assembly_method": "goldengate",
+  "vector_sequence": "ATCG...",
+  "vector_overhang_left": "AAAA",
+  "vector_overhang_right": "TCAC",
+  "parts": [...],
+  "modules": [...]
+}
+```
+
+| 필드 | 타입 | 필수 | 설명 |
+|------|------|------|------|
+| `project_name` | string | ✅ | 프로젝트 식별자 |
+| `assembly_method` | `"goldengate"` \| `"gibson"` | — | 기본값: `"goldengate"` |
+| `vector_sequence` | string | — | 벡터 DNA 서열. 미제공 시 `assets/pUC19.gb` 사용 |
+| `vector_overhang_left` | string | — | 벡터 좌측 접합 오버행 (4 nt). 첫 번째 파트 `overhang_left`와 일치해야 함. 미지정 시 검증 생략 |
+| `vector_overhang_right` | string | — | 벡터 우측 접합 오버행 (4 nt). 마지막 파트 `overhang_right`와 일치해야 함. 미지정 시 검증 생략 |
+| `parts` | `PartInput[]` | ✅ | 파트 목록 |
+| `modules` | `ModuleInput[]` | ✅ | 모듈 설계 |
+
+#### PartInput
+
+```json
+{
+  "id": "p1",
+  "kid": "KBp_a0001",
+  "name": "T7_promoter",
+  "type": "Promoter",
+  "sequence": "TAATACGACTCACTATA",
+  "direction": "forward",
+  "overhang_left": "GGAG",
+  "overhang_right": "CTTT"
+}
+```
+
+| 필드 | 설명 |
+|------|------|
+| `name` | GenBank LOCUS 이름으로 사용. 공백은 `_`로 자동 치환 |
+| `type` | 슬롯 타입과 다르면 경고 (조립은 계속 진행) |
+| `overhang_left` | BsaI 절단 후 파트 왼쪽 4 nt sticky end |
+| `overhang_right` | BsaI 절단 후 파트 오른쪽 4 nt sticky end |
+
+#### ModuleInput / ModuleSlot
+
+```json
+{
+  "id": "MM1",
+  "slots": [
+    {"type": "Promoter",   "part_names": ["T7_promoter"]},
+    {"type": "RBS",        "part_names": ["T7_RBS", "B0034"]},
+    {"type": "CDS",        "part_names": ["sfGFP"]},
+    {"type": "Terminator", "part_names": ["T7_terminator"]}
+  ]
+}
+```
+
+- 슬롯 내 파트가 2개 이상이면 조합 폭발(combinatorial expansion) 수행
+- `part_names`의 파트는 `parts` 배열에 반드시 존재해야 함
+
+#### Response Body
+
+```json
+{
+  "combinations": [
+    {
+      "id": "MM1_T7_promoter-T7_RBS-sfGFP-T7_terminator",
+      "sequence": "ATCG...",
+      "length": 1234,
+      "genbank_b64": "TE9DVVMg...",
+      "primers": [
+        {"target": "T7_promoter", "direction": "forward", "sequence": "ATCG...", "tm": 58.3, "length": 20}
+      ],
+      "features": [
+        {"label": "T7_promoter", "start": 0, "end": 17, "strand": 1}
+      ]
+    }
+  ],
+  "total_combinations": 2,
+  "errors": [
+    "MM1_T7_promoter-B0034-sfGFP-T7_terminator: 벡터 내 BsaI 사이트 1개 발견 — 시뮬레이션을 위해 자동 치환됨"
+  ]
+}
+```
+
+**`errors` 배열 구조**
+
+- `{combo_key}: ...` — 특정 조합에서 발생한 오류/경고
+- 콤보 키 미포함 — 전체 공통 오류 (파트 미발견, 벡터 읽기 실패 등)
+
+**GenBank 디코딩 예시 (Python)**
+
+```python
+import base64
+gb_text = base64.b64decode(result["genbank_b64"]).decode()
+```
+
+---
+
+## GoldenGate 어셈블리 로직
+
+### 1단계: 파트 준비 (`prepare_goldengate_fragments`)
+
+각 파트를 BsaI 절단 가능한 `-withvector.gb` 파일로 변환합니다.
+
+**Case A — 파트에 BsaI 사이트 2개 정확히 존재 (`GGTCTC` + `GAGACC`)**
+1. 기존 BsaI 사이트 사이 서열 추출
+2. 실제 오버행이 슬롯 설정(`overhang_left`/`overhang_right`)과 일치하는지 검증
+3. 불일치 시 → Case B 낙오 처리 (경고 기록)
+
+**Case B — BsaI 사이트 없거나 오버행 불일치**
+
+```
+GGTCTCA[OHL][sequence][OHR]TGAGACC
+```
+
+래핑 후 접합부(`OHL+seq[:6]`, `seq[-6:]+OHR`)에서 우발적 BsaI 사이트 생성 여부 자동 검사.
+
+**오류 처리**
+- BsaI 사이트 3개 이상 → 해당 파트 제외
+- 우발적 접합부 BsaI → 경고 + 조립 진행 (결과 부정확 가능)
+
+파일명 형식: `{OHL}-{part_name}-{OHR}-withvector.gb`
+
+### 2단계: 조합 필터링 (`filter_combinations_by_overhang`)
+
+```
+Slot 1: [OHL1-P1-OHR1]  →  OHR1 == OHL2 ?
+Slot 2: [OHL2-P2-OHR2]  →  OHR2 == OHL3 ?
+Slot 3: [OHL3-P3-OHR3]
+```
+
+인접 슬롯 간 오버행이 연속적으로 일치하는 조합만 통과.  
+조합 ID: `{module.id}_{part1}-{part2}-{part3}`
+
+### 3단계: 어셈블리 (`assemble_goldengate`)
+
+각 유효 조합에 대해:
+
+1. 각 파트 `-withvector.gb` 로드 → BsaI 절단 → 가장 긴 fragment 선택
+2. 벡터 제공 시:
+   - 벡터 내 BsaI 사이트 자동 치환 (`GGTCTC→GGTCTG`, `GAGACC→GAGACG`)
+   - 벡터 래핑: `GGTCTCA[OHR_last][vector][OHL_first]TGAGACC`
+   - `vector_overhang_left`/`vector_overhang_right` 지정 시 오버행 일치 검증 후 불일치 조합 제외
+   - BsaI 절단 → 벡터 backbone fragment 획득
+   - **원형(circular) 조립** 수행
+3. 벡터 미제공 시: 선형(linear) 조립
+4. 결과 feature 정리: BsaI 마커, 오버행 레이블, 범위 오류 feature 제거
+
+**오버행 연결 구조**
+
+```
+[vector] ─── OHL_first ───► [Part1] ─── OHR1/OHL2 ───► [Part2] ─── OHR_last ─── [vector]
+```
+
+---
+
+## 오류 / 경고 메시지 해설
+
+| 메시지 | 원인 | 영향 |
+|--------|------|------|
+| `벡터 내 BsaI 사이트 N개 발견 — 시뮬레이션을 위해 자동 치환됨` | 벡터 서열에 BsaI 인식 서열 존재 | 시뮬레이션 자동 보정. **실험 시 벡터 수정 필요** |
+| `[경고] {part}: 슬롯 타입 'X'에 파트 타입 'Y'이 배치됨` | 슬롯 타입과 파트의 실제 타입 불일치 | 조립 계속 진행. 설계 확인 권장 |
+| `[경고] {part}: OHR 'XX' + 서열 3' 말단에서 의도치 않은 BsaI 사이트 N개 생성` | 파트 서열 말단과 오버행 결합 시 우발적 `GAGACC`/`GGTCTC` 형성 | 해당 파트를 포함한 조합 결과 부정확 가능. **오버행 변경 권장** |
+| `{combo}: 벡터 좌측/우측 오버행 불일치` | `vector_overhang_left`/`right`가 파트 실제 오버행과 다름 | 해당 조합 제외 |
+| `{combo}: no BsaI site found in {gbfile}` | BsaI 절단 후 fragment 없음 | 해당 조합 제외 |
+| `{combo}: circular assembly produced no candidates` | pydna `assemble_circular()` 후보 없음 | 해당 조합 제외. 오버행 연속성 재확인 필요 |
+| `Part 'X' not found in request` | `module.slots[].part_names`에 있는 파트가 `parts` 배열에 없음 | 해당 파트 제외 |
+
+### 우발적 BsaI 사이트 발생 패턴 주의
+
+`AGGAGA`로 끝나는 서열(예: 일부 RBS) + `CC`로 시작하는 OHR 조합:
+
+```
+...AGGAGA + CCXX  →  AGGAGACC  →  GAGACC (BsaI 역방향 인식!)
+```
+
+`CC`로 시작하는 OHR 대신 `TCAC`, `GCAG`, `AATG` 등 사용 권장.
+
+---
+
+## Partbank26 연동
+
+백엔드 프록시 위치: `backend/app/presentation/api/v1/combinatorial.py`
+
+**동작 흐름**
+1. 사용자 요청에서 `part_ids` 수신
+2. DB에서 파트 서열 조회 (권한 검사 포함)
+3. 슬롯의 `overhang_left`/`overhang_right`를 해당 슬롯의 모든 파트에 적용
+4. `vector_id` 제공 시 벡터 서열 DB 조회
+5. 마이크로서비스 `/run`으로 포워딩
+
+**Partbank RunRequest 스키마**
+
+```json
+{
+  "project_name": "my_project",
+  "assembly_method": "goldengate",
+  "vector_id": "<vector_db_id>",
+  "vector_overhang_left": "GGAG",
+  "vector_overhang_right": "TCAC",
+  "modules": [
+    {
+      "id": "MM1",
+      "slots": [
+        {
+          "type": "Promoter",
+          "part_ids": ["<partbank_id_1>", "<partbank_id_2>"],
+          "overhang_left": "GGAG",
+          "overhang_right": "CTTT"
+        }
+      ]
+    }
+  ]
+}
+```
+
+> **주의**: 슬롯의 `overhang_left`/`overhang_right`는 해당 슬롯 내 모든 파트에 동일하게 적용됩니다.  
+> 파트별로 오버행이 다른 경우 별도 슬롯으로 분리하세요.
+
+---
+
+## 테스트
+
+```bash
+# Docker 컨테이너 내에서 전체 실행
+docker exec partbank-combinatorial-dev python -m pytest tests/ -v
+
+# 테스트 클래스별 실행
+docker exec partbank-combinatorial-dev python -m pytest tests/test_api_integration.py::TestBsaiCutBehavior -v
+docker exec partbank-combinatorial-dev python -m pytest tests/test_api_integration.py::TestCircularGoldenGateAssembly -v
+docker exec partbank-combinatorial-dev python -m pytest tests/test_api_integration.py::TestPartTypeMismatchWarning -v
+docker exec partbank-combinatorial-dev python -m pytest tests/test_api_integration.py::TestVectorOverhangValidation -v
+```
+
+**테스트 클래스 목록** (총 28개)
+
+| 클래스 | 설명 |
+|--------|------|
+| `TestHealthEndpoint` | 헬스체크 |
+| `TestRunInputValidation` | 입력 검증 (빈 파트, 필수 필드 등) |
+| `TestRunAssembly` | 기본 조립, 2×2 조합 확장, 프라이머 검증 |
+| `TestBsaiCutBehavior` | `_wrap_with_bsai`, BsaI 절단 fragment 검증 |
+| `TestCircularGoldenGateAssembly` | 2파트/4파트 원형 조립, 벡터 포함 조립 |
+| `TestPartTypeMismatchWarning` | 슬롯-파트 타입 불일치 경고 |
+| `TestVectorOverhangValidation` | 벡터 오버행 검증 (일치/불일치/미지정) |
+
+---
+
+## 주요 변경 이력
+
+### v2.0 (2026-04) — FastAPI 마이크로서비스화
+
+기존 Jupyter notebook 기반 스크립트를 FastAPI REST API로 전환.
+
+| 항목 | 내용 |
+|------|------|
+| **BsaI 사이트 감지** | 기존 BsaI 사이트 2개 파트 자동 인식 및 오버행 검증 |
+| **벡터 circular 조립** | 벡터 backbone 포함 `assemble_circular()` 지원 |
+| **내부 BsaI 자동 치환** | 벡터 내 BsaI 사이트 시뮬레이션용 자동 치환 |
+| **우발적 접합부 BsaI 감지** | 파트 서열 말단 + OHR 결합 시 BsaI 생성 여부 자동 검사 |
+| **파트 타입 불일치 경고** | 슬롯 타입 vs 파트 실제 타입 비교 경고 |
+| **벡터 오버행 검증** | `vector_overhang_left`/`right` 지정 시 불일치 조합 제외 |
+| **feature 정리** | 조립 후 BsaI 마커, 오버행 레이블, 범위 오류 feature 자동 제거 |
+| **조합별 에러 분리** | `errors[]`의 `{combo_key}:` prefix로 프론트엔드 카드별 표시 |
+| **TDD** | 28개 통합 테스트 (pydna 실제 실행, mock 없음) |
+
+---
+
+## 레거시 사용법 (Jupyter 스크립트)
+
+> 아래는 v1.0 Jupyter 기반 스크립트 사용법입니다. 현재는 FastAPI 마이크로서비스(`api.py`)가 주 인터페이스입니다.
+
+<details>
+<summary>펼치기</summary>
+
+### 사용법
+
+```bash
+git clone git@github.com:sblabkribb/combinatorial_design.git
+cd combinatorial_design
+```
+
+- `projects/` 하위에 프로젝트 폴더 생성 (예: `haseong_240704`)
+- `assembly_design.xlsx` 복사 후 편집
+  - 시트1: part 디자인
+  - 시트2: module 디자인
+  - 시트3: multi-module 디자인
+  - 시트4: pathway 디자인
+- 파트 정보는 `PartDB-kribb.xlsx` 참조
+
+### 파트 준비
+
+```python
+import part_preparation as pprep
+project_dir = "haseong_240704"
+pprep.part_insert_goldengate(project_dir, "assembly_design.xlsx")
+pprep.part_withvector_gibson(project_dir, "pUC19.gb", "MCS")
+```
+
+### 모듈 조립
+
+```python
+import part_assembly as pasm
+allcomb = pasm.get_all_possible_combinations(project_dir, "assembly_design.xlsx")
+module_linear = pasm.part_assembly_goldengate(project_dir, allcomb)
+module_withvector = pasm.build_module_withvector_gibson(project_dir, "pUC19.gb", module_linear)
+```
+
+### 멀티모듈 / 경로 조립
+
+```python
+import module_assembly as masm
+assembly_linear = masm.module_combinatorial_gibson_assembly(project_dir, "assembly_design.xlsx")
+assembly_circular = masm.module_comb_withvector_gibson_assembly(project_dir, "pUC19.gb", assembly_linear)
+all_pathways = masm.pathway_comb_withvector_gibson_assembly(project_dir, "assembly_design.xlsx", "pUC19.gb", assembly_linear)
+```
+
+</details>
 
 ## 1. 사용법 간단한 설명
 - 임의의 폴더 위치에서 다음 입력 (command line)
