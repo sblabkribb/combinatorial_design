@@ -257,3 +257,117 @@ class TestFilterCombinationsByOverhang:
         )]
         result = filter_combinations_by_overhang(modules, files)
         assert len(result) == 4
+
+
+# ── filter_combinations_by_overhang — multi-module ────────────────────────────
+
+class TestFilterCombinationsMultiModule:
+    """
+    Multi-module sequential assembly tests.
+
+    Design intent: multiple modules are treated as an ordered sequence of slot
+    groups. The Cartesian product is taken across ALL slots from ALL modules,
+    and the overhang chain is validated end-to-end (including inter-module
+    junctions).
+
+    Example:
+        Module 1: [PromA|PromB] — O1 — [RBS1]
+        Module 2: [HcaR|HbpR]
+
+        Expected combinations (4):
+            PromA-RBS1-HcaR, PromA-RBS1-HbpR
+            PromB-RBS1-HcaR, PromB-RBS1-HbpR
+    """
+
+    def make_withvector_files(self, specs: list[tuple]) -> list[str]:
+        return [f"{ol}-{name}-{or_}-withvector.gb" for ol, name, or_ in specs]
+
+    def test_two_modules_cross_product(self):
+        """2 modules → cross-module Cartesian product, not per-module independent."""
+        files = self.make_withvector_files([
+            ("OL", "PromA", "O1"),
+            ("OL", "PromB", "O1"),
+            ("O1", "HcaR",  "OR"),
+        ])
+        modules = [
+            ModuleInput(id="MM1", slots=[ModuleSlot(type="Promoter", part_names=["PromA", "PromB"])]),
+            ModuleInput(id="MM2", slots=[ModuleSlot(type="CDS",      part_names=["HcaR"])]),
+        ]
+        result = filter_combinations_by_overhang(modules, files)
+        assert len(result) == 2  # PromA-HcaR, PromB-HcaR
+
+    def test_two_modules_multi_slot_cross_product(self):
+        """MM1: 2 slots (2×1), MM2: 1 slot (2) → 4 combinations total."""
+        files = self.make_withvector_files([
+            ("OL", "PromA", "O1"), ("OL", "PromB", "O1"),
+            ("O1", "RBS1",  "O2"),
+            ("O2", "HcaR",  "OR"), ("O2", "HbpR",  "OR"),
+        ])
+        modules = [
+            ModuleInput(id="MM1", slots=[
+                ModuleSlot(type="Promoter", part_names=["PromA", "PromB"]),
+                ModuleSlot(type="RBS",      part_names=["RBS1"]),
+            ]),
+            ModuleInput(id="MM2", slots=[
+                ModuleSlot(type="CDS", part_names=["HcaR", "HbpR"]),
+            ]),
+        ]
+        result = filter_combinations_by_overhang(modules, files)
+        assert len(result) == 4
+
+    def test_inter_module_overhang_mismatch_excluded(self):
+        """Module 1 last slot OR ≠ Module 2 first slot OL → excluded."""
+        files = self.make_withvector_files([
+            ("OL", "PromA", "O1"),   # Module 1 ends with O1
+            ("O2", "HcaR",  "OR"),   # Module 2 starts with O2 ≠ O1
+        ])
+        modules = [
+            ModuleInput(id="MM1", slots=[ModuleSlot(type="Promoter", part_names=["PromA"])]),
+            ModuleInput(id="MM2", slots=[ModuleSlot(type="CDS",      part_names=["HcaR"])]),
+        ]
+        result = filter_combinations_by_overhang(modules, files)
+        assert len(result) == 0
+
+    def test_three_modules_cross_product(self):
+        """3 modules → full end-to-end cross product (2×1×2 = 4)."""
+        files = self.make_withvector_files([
+            ("OL", "PromA", "O1"), ("OL", "PromB", "O1"),
+            ("O1", "RBS1",  "O2"),
+            ("O2", "HcaR",  "OR"), ("O2", "HbpR",  "OR"),
+        ])
+        modules = [
+            ModuleInput(id="MM1", slots=[ModuleSlot(type="Promoter", part_names=["PromA", "PromB"])]),
+            ModuleInput(id="MM2", slots=[ModuleSlot(type="RBS",      part_names=["RBS1"])]),
+            ModuleInput(id="MM3", slots=[ModuleSlot(type="CDS",      part_names=["HcaR", "HbpR"])]),
+        ]
+        result = filter_combinations_by_overhang(modules, files)
+        assert len(result) == 4
+
+    def test_single_module_regression(self):
+        """Single module behavior must be unchanged (regression guard)."""
+        files = self.make_withvector_files([
+            ("O1", "ProA", "O2"), ("O1", "ProB", "O2"),
+            ("O2", "RBS1", "O3"),
+        ])
+        modules = [ModuleInput(
+            id="MM1",
+            slots=[
+                ModuleSlot(type="Promoter", part_names=["ProA", "ProB"]),
+                ModuleSlot(type="RBS",      part_names=["RBS1"]),
+            ],
+        )]
+        result = filter_combinations_by_overhang(modules, files)
+        assert len(result) == 2
+
+    def test_combo_keys_are_unique(self):
+        """Each cross-module combination must have a unique key."""
+        files = self.make_withvector_files([
+            ("OL", "PromA", "O1"), ("OL", "PromB", "O1"),
+            ("O1", "HcaR",  "OR"), ("O1", "HbpR",  "OR"),
+        ])
+        modules = [
+            ModuleInput(id="MM1", slots=[ModuleSlot(type="Promoter", part_names=["PromA", "PromB"])]),
+            ModuleInput(id="MM2", slots=[ModuleSlot(type="CDS",      part_names=["HcaR", "HbpR"])]),
+        ]
+        result = filter_combinations_by_overhang(modules, files)
+        assert len(result) == len(set(result.keys()))

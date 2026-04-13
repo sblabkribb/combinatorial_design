@@ -14,7 +14,7 @@ import re
 import shutil
 import tempfile
 from itertools import product as iter_product
-from typing import Optional
+from typing import Literal, Optional
 
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
@@ -38,6 +38,70 @@ ASSETS_DIR = pathlib.Path(__file__).parent / "assets"
 DEFAULT_VECTOR_PATH = ASSETS_DIR / "pUC19.gb"
 
 
+def _gibson_terminal_overlap_limit() -> int:
+    """Return the minimum terminal overlap length used by pydna assembly."""
+    raw = os.getenv("GIBSON_TERMINAL_OVERLAP_LIMIT", "20").strip()
+    try:
+        value = int(raw)
+    except ValueError:
+        return 20
+    return max(1, value)
+
+
+def _rc(seq: str) -> str:
+    """Return reverse complement of a DNA sequence."""
+    comp = str.maketrans("ATGCNatgcn", "TACGNtacgn")
+    return seq.translate(comp)[::-1]
+
+
+def _extract_primer_tail(primer_seq: str, template_seq: str, min_anneal: int = 12) -> str:
+    """Return the 5' tail of primer_seq that does not anneal to template_seq."""
+    p = primer_seq.upper()
+    t = template_seq.upper()
+    search_region = t[:100 + len(p)]
+    for tail_len in range(len(p) - min_anneal + 1):
+        anneal = p[tail_len:]
+        check = min(len(anneal), min_anneal + 5)
+        if anneal[:check] in search_region:
+            return p[:tail_len]
+    return p  # all tail, no annealing found
+
+
+def _build_gg_pcr_product(
+    template: str,
+    fwd_seq: str,
+    rev_seq: str,
+    min_anneal: int = 12,
+) -> str:
+    """
+    Reconstruct the Golden Gate PCR product from primers + template.
+
+    fwd primer: 5'-[BsaI][OHL][extra][annealing_to_template_5']-3'
+    rev primer: 5'-[BsaI_rev][OHR][extra][annealing_to_template_3'_rc]-3'
+
+    PCR product = fwd_full + template_middle + rc(rev_full)
+    where template_middle = template[len(fwd_anneal):len(template)-len(rev_anneal)]
+
+    The product contains 2 BsaI sites, so _find_bsai_insert (Case A) handles it
+    correctly and preserves the extra nt between overhang and annealing.
+    """
+    t = template.upper()
+    f = fwd_seq.upper()
+    r = rev_seq.upper()
+
+    fwd_tail = _extract_primer_tail(f, t, min_anneal)
+    fwd_anneal_len = len(f) - len(fwd_tail)
+
+    rev_tail = _extract_primer_tail(r, _rc(t), min_anneal)
+    rev_anneal_len = len(r) - len(rev_tail)
+
+    middle_start = fwd_anneal_len
+    middle_end = len(t) - rev_anneal_len
+    middle = t[middle_start:middle_end] if middle_end > middle_start else ""
+
+    return f + middle + _rc(r)
+
+
 # ── Pydantic Schemas ──────────────────────────────────────────────────────────
 
 class PartInput(BaseModel):
@@ -49,10 +113,13 @@ class PartInput(BaseModel):
     direction: str = "forward"
     overhang_left: str
     overhang_right: str
+    source_type: Literal["part", "device"] = "part"
+    source_id: Optional[str] = None
+    primer_ids: list[str] = []
 
 
 class ModuleSlot(BaseModel):
-    type: str
+    type: str = ""
     part_names: list[str]
 
 
@@ -61,23 +128,26 @@ class ModuleInput(BaseModel):
     slots: list[ModuleSlot]
 
 
-class RunRequest(BaseModel):
-    project_name: str
-    assembly_method: str = "goldengate"
-    vector_sequence: Optional[str] = None
-    vector_mcs_feature: str = "MCS"
-    vector_overhang_left: Optional[str] = None   # 벡터 좌측 접합부 오버행 (첫 번째 파트 OHL과 일치해야 함)
-    vector_overhang_right: Optional[str] = None  # 벡터 우측 접합부 오버행 (마지막 파트 OHR과 일치해야 함)
-    parts: list[PartInput]
-    modules: list[ModuleInput]
-
-
 class PrimerResult(BaseModel):
     target: str
     direction: str
     sequence: str
     tm: float
     length: int
+
+
+class PrimerInputData(BaseModel):
+    id: str
+    name: str
+    sequence: str
+    direction: str = "forward"
+
+
+class PrimerPosition(BaseModel):
+    primer_id: str
+    name: str
+    sequence: str
+    direction: str
 
 
 class FeatureResult(BaseModel):
@@ -96,10 +166,33 @@ class CombinationResult(BaseModel):
     features: list[FeatureResult]
 
 
+class PhaseConfig(BaseModel):
+    phase: int
+    assembly_method: str
+    module_indices: list[int]
+
+
+class RunRequest(BaseModel):
+    project_name: str
+    assembly_method: str = "goldengate"
+    vector_sequence: Optional[str] = None
+    vector_mcs_feature: str = "MCS"
+    vector_overhang_left: Optional[str] = None   # GoldenGate: 벡터 좌측 4nt 오버행
+    vector_overhang_right: Optional[str] = None  # GoldenGate: 벡터 우측 4nt 오버행
+    vector_overlap_left: Optional[str] = None    # Gibson: 벡터 좌측 접합 오버랩 (20+ nt)
+    vector_overlap_right: Optional[str] = None   # Gibson: 벡터 우측 접합 오버랩 (20+ nt)
+    parts: list[PartInput]
+    modules: list[ModuleInput]
+    primer_ids: Optional[list[str]] = None
+    primer_inputs: Optional[list[PrimerInputData]] = None
+    phases: Optional[list[PhaseConfig]] = None   # 3G Assembly용 (미래 확장)
+
+
 class RunResponse(BaseModel):
     combinations: list[CombinationResult]
     total_combinations: int
     errors: list[str]
+    primer_positions: list[PrimerPosition] = []
 
 
 # ── Helper Functions ──────────────────────────────────────────────────────────
@@ -143,6 +236,187 @@ def extract_features(record) -> list[FeatureResult]:
             strand=f.location.strand if f.location.strand is not None else 1,
         ))
     return results
+
+
+def _feature_labels(record) -> list[str]:
+    labels: list[str] = []
+    for feature in getattr(record, "features", []) or []:
+        if "label" not in feature.qualifiers:
+            continue
+        value = feature.qualifiers["label"]
+        label = value[0] if isinstance(value, list) else value
+        labels.append(str(label))
+    return labels
+
+
+def _pick_goldengate_fragment(
+    cut_fragments: list,
+    part_label: str,
+    overhang_left: str,
+    overhang_right: str,
+):
+    """Pick the digested fragment that best matches the intended insert."""
+    required = {part_label, overhang_left.upper(), overhang_right.upper()}
+    part_only = []
+    exact = []
+
+    for frag in cut_fragments:
+        labels = set(_feature_labels(frag))
+        if required.issubset(labels):
+            exact.append(frag)
+        elif part_label in labels:
+            part_only.append(frag)
+
+    if exact:
+        return max(exact, key=lambda x: len(x))
+    if part_only:
+        return max(part_only, key=lambda x: len(x))
+    return max(cut_fragments, key=lambda x: len(x))
+
+
+def _format_goldengate_declared_chain(gb_files: list[str], vector_used: bool) -> str:
+    chain: list[str] = []
+    if gb_files:
+        first = gb_files[0].replace("-withvector.gb", "").split("-")
+        last = gb_files[-1].replace("-withvector.gb", "").split("-")
+        if vector_used and len(first) >= 2 and len(last) >= 2:
+            chain.append(f"vector_backbone({last[-1]}->{first[0]})")
+
+    for gbfile in gb_files:
+        stem = gbfile.replace("-withvector.gb", "")
+        parts = stem.split("-")
+        if len(parts) >= 3:
+            name = "-".join(parts[1:-1])
+            chain.append(f"{name}({parts[0]}->{parts[-1]})")
+        else:
+            chain.append(stem)
+
+    return " -> ".join(chain)
+
+
+def _format_goldengate_fragment_summary(fragments: list) -> str:
+    summary: list[str] = []
+    for idx, frag in enumerate(fragments):
+        try:
+            labels = _feature_labels(frag)
+            core_labels = [
+                label for label in labels
+                if label != "BsaI" and not re.fullmatch(r"[ACGTacgt]{3,8}", label)
+            ]
+            label = core_labels[0] if core_labels else (labels[0] if labels else f"frag{idx}")
+            ds = frag.seq if hasattr(frag, "seq") else frag
+            try:
+                l_type, l_seq = ds.five_prime_end()
+                r_type, r_seq = ds.three_prime_end()
+                ends = f"L={l_type}({l_seq or 'blunt'}) R={r_type}({r_seq or 'blunt'})"
+            except Exception:
+                ends = f"ovhg={getattr(ds, 'ovhg', '?')}"
+            summary.append(f"{label}({ends}, len={len(frag)})")
+        except Exception as exc:
+            summary.append(f"frag{idx}(summary_error={exc})")
+    return "\n  ".join(summary)
+
+
+def _reannotate_goldengate_assembly(
+    assembled,
+    gb_files: list[str],
+    withvector_path: str,
+    parts: list,
+) -> None:
+    """
+    Restore part-name features that may be lost during pydna assembly.
+
+    Strategy (tried in order):
+    1. Read withvector .gb file with BioPython, find the part-labeled feature,
+       use that exact sequence for the search.
+    2. Fallback: use orig_part.sequence (template) from the request.
+    In both cases, also try reverse complement if forward search fails.
+    """
+    assembled_seq = str(assembled.seq).upper()
+    seq_len = len(assembled_seq)
+    part_lookup = {p.name.replace(" ", "_"): p for p in parts}
+    existing = {f.qualifiers.get("label", [""])[0] for f in assembled.features}
+
+    for gbfile in gb_files:
+        stem = gbfile.replace("-withvector.gb", "")
+        stem_parts = stem.split("-")
+        if len(stem_parts) < 3:
+            continue
+        part_name = "-".join(stem_parts[1:-1])
+        if part_name in existing:
+            continue
+
+        orig_part = part_lookup.get(part_name)
+
+        # --- Collect candidate sequences to search for ---
+        candidates: list[str] = []
+
+        # 1. Sequence from withvector file feature (preserves primer extra nt)
+        try:
+            bio_rec = SeqIO.read(os.path.join(withvector_path, gbfile), "genbank")
+            for f in bio_rec.features:
+                lbl = f.qualifiers.get("label", [""])[0]
+                if lbl == part_name:
+                    s = str(bio_rec.seq[int(f.location.start):int(f.location.end)]).upper()
+                    if len(s) >= 4:
+                        candidates.append(s)
+                    break
+        except Exception:
+            pass
+
+        # 2. Fallback: template sequence from request
+        if orig_part and orig_part.sequence:
+            seq = orig_part.sequence.upper()
+            if orig_part.direction == "reverse":
+                seq = _rc(seq)
+            candidates.append(seq)
+
+        if not candidates:
+            continue
+
+        # --- Search assembled sequence ---
+        found_pos: int = -1
+        found_seq: str = ""
+        found_strand: int = 1
+
+        doubled = assembled_seq + assembled_seq  # for wrap-around
+
+        for cand in candidates:
+            for strand, search_seq in [(1, cand), (-1, _rc(cand))]:
+                pos = assembled_seq.find(search_seq)
+                if pos == -1:
+                    # try wrap-around
+                    pos = doubled.find(search_seq)
+                    if pos != -1 and pos < seq_len:
+                        pass  # valid wrap-around start
+                    else:
+                        pos = -1
+                if pos != -1:
+                    found_pos = pos
+                    found_seq = search_seq
+                    found_strand = strand
+                    break
+            if found_pos != -1:
+                break
+
+        if found_pos == -1:
+            continue
+
+        feat_type = (orig_part.type if orig_part and orig_part.type else "misc_feature")
+        end_pos = found_pos + len(found_seq)
+        if end_pos > seq_len:
+            # wrap-around feature — use CompoundLocation
+            from Bio.SeqFeature import CompoundLocation
+            loc = CompoundLocation([
+                FeatureLocation(found_pos, seq_len, found_strand),
+                FeatureLocation(0, end_pos - seq_len, found_strand),
+            ])
+        else:
+            loc = FeatureLocation(found_pos, end_pos, found_strand)
+
+        assembled.features.append(
+            SeqFeature(loc, type=feat_type, qualifiers={"label": [part_name]})
+        )
 
 
 def remove_duplicate_features(record):
@@ -327,6 +601,7 @@ def prepare_goldengate_fragments(
     parts: list,
     modules: list,
     withvector_path: str,
+    primer_inputs_map: dict | None = None,
 ) -> list[str]:
     """
     Prepare -withvector.gb files for GoldenGate assembly without Gibson cloning.
@@ -339,10 +614,16 @@ def prepare_goldengate_fragments(
     Case B — 0 or 1 BsaI sites, or overhang mismatch:
       Wrap bare sequence: GGTCTCA[OHL][seq][OHR]TGAGACC
 
+    Primer PCR mode — part has primer_ids:
+      Reconstruct PCR product = fwd_primer + template_middle + rc(rev_primer).
+      The product embeds BsaI sites from primer tails (→ falls into Case A),
+      preserving extra nucleotides between the overhang and annealing region.
+
     Error → skip part and record error message:
       > 2 BsaI sites in a single part.
     """
     errors: list[str] = []
+    primer_inputs_map = primer_inputs_map or {}
     # overhang_left/right lives on PartInput, not ModuleSlot
     part_lookup = {p.name: p for p in parts}
 
@@ -354,14 +635,41 @@ def prepare_goldengate_fragments(
                     errors.append(f"Part '{part_name}' not found in request")
                     continue
 
-                # Q2: 슬롯 타입 vs 파트 실제 타입 불일치 경고
-                if part.type.lower() != slot.type.lower():
-                    errors.append(
-                        f"[경고] {part.name}: 슬롯 타입 '{slot.type}'에 "
-                        f"파트 타입 '{part.type}'이 배치됨 — 설계를 확인하세요."
-                    )
+                template_seq = part.sequence.upper()
 
-                seq = part.sequence.upper()
+                # ── Primer PCR mode ──────────────────────────────────────────
+                # If primers are associated with this part, reconstruct the
+                # full PCR product so that BsaI-OHL-extra and BsaI-OHR-extra
+                # from the primer tails are included in the assembled fragment.
+                if part.primer_ids and primer_inputs_map:
+                    part_primers = [
+                        primer_inputs_map[pid]
+                        for pid in part.primer_ids
+                        if pid in primer_inputs_map
+                    ]
+                    fwd_primers = [p for p in part_primers if p.direction == "forward"]
+                    rev_primers = [p for p in part_primers if p.direction == "reverse"]
+
+                    if fwd_primers and rev_primers:
+                        seq = _build_gg_pcr_product(
+                            template_seq,
+                            fwd_primers[0].sequence,
+                            rev_primers[0].sequence,
+                        )
+                    elif fwd_primers:
+                        # Only forward primer available — prepend tail only
+                        fwd = fwd_primers[0].sequence.upper()
+                        tail = _extract_primer_tail(fwd, template_seq)
+                        seq = fwd + template_seq[len(fwd) - len(tail):]
+                    elif rev_primers:
+                        # Only reverse primer available — append rc tail only
+                        rev = rev_primers[0].sequence.upper()
+                        tail = _extract_primer_tail(rev, _rc(template_seq))
+                        seq = template_seq[: len(template_seq) - (len(rev) - len(tail))] + _rc(rev)
+                    else:
+                        seq = template_seq
+                else:
+                    seq = template_seq
                 safe_name = part.name.replace(" ", "_")
                 oh_l = part.overhang_left
                 oh_r = part.overhang_right
@@ -415,6 +723,270 @@ def prepare_goldengate_fragments(
                 SeqIO.write(record, fpath, "genbank")
 
     return errors
+
+
+def prepare_gibson_fragments(
+    parts: list,
+    modules: list,
+    withvector_path: str,
+) -> list[str]:
+    """
+    Prepare -withvector.gb files for Gibson assembly.
+
+    Each fragment = overlap_left + part_sequence + overlap_right.
+    overlap_left/right are stored in PartInput.overhang_left/overhang_right.
+
+    Validates:
+    - overlap length >= 20 nt (warns if shorter)
+    - slot type vs part type mismatch (warns)
+
+    File naming: {ol[:8]}-{part_name}-{or[:8]}-withvector.gb
+    (8nt prefix used in filename; filter_combinations_by_overhang reuses same logic)
+    """
+    errors: list[str] = []
+    min_overlap = _gibson_terminal_overlap_limit()
+    part_lookup = {p.name: p for p in parts}
+
+    for module in modules:
+        for slot in module.slots:
+            for part_name in slot.part_names:
+                part = part_lookup.get(part_name)
+                if not part:
+                    errors.append(f"Part '{part_name}' not found in request")
+                    continue
+
+                ol = part.overhang_left
+                or_ = part.overhang_right
+
+                # Overlap length validation — 3-tier rules (Item 5)
+                skip = False
+                if len(ol) < 10:
+                    errors.append(
+                        f"[에러] {part.name}: overlap_left 길이 {len(ol)}nt — "
+                        "10nt 미만은 Gibson 조립 불가. 이 파트는 제외됩니다."
+                    )
+                    skip = True
+                elif len(ol) < 20:
+                    errors.append(
+                        f"[경고] {part.name}: overlap_left 길이 {len(ol)}nt — "
+                        f"Gibson은 20nt 이상 권장 (현재 엔진 최소 {min_overlap}nt, 10–19nt는 조립 불안정)"
+                    )
+                if len(or_) < 10:
+                    errors.append(
+                        f"[에러] {part.name}: overlap_right 길이 {len(or_)}nt — "
+                        "10nt 미만은 Gibson 조립 불가. 이 파트는 제외됩니다."
+                    )
+                    skip = True
+                elif len(or_) < 20:
+                    errors.append(
+                        f"[경고] {part.name}: overlap_right 길이 {len(or_)}nt — "
+                        f"Gibson은 20nt 이상 권장 (현재 엔진 최소 {min_overlap}nt, 10–19nt는 조립 불안정)"
+                    )
+                if skip:
+                    continue
+
+                # Full fragment: overlap_left + core + overlap_right
+                core_seq = part.sequence.upper()
+                full_seq = ol.upper() + core_seq + or_.upper()
+                safe_name = part.name.replace(" ", "_")
+
+                # Use first 8nt of each overlap as filename key
+                # (filter_combinations_by_overhang uses split("-")[0] and split("-")[-1])
+                ol_key = ol[:8].upper()
+                or_key = or_[:8].upper()
+                fname = f"{ol_key}-{safe_name}-{or_key}-withvector.gb"
+                fpath = os.path.join(withvector_path, fname)
+
+                record = SeqRecord(
+                    Seq(full_seq),
+                    id=safe_name,
+                    name=safe_name[:16],
+                    description=f"Gibson fragment: {safe_name}",
+                    annotations={"molecule_type": "DNA"},
+                )
+                ol_len = len(ol)
+                core_len = len(core_seq)
+                record.features = [
+                    SeqFeature(
+                        FeatureLocation(0, ol_len),
+                        type="misc_feature",
+                        qualifiers={"label": [ol_key]},
+                    ),
+                    SeqFeature(
+                        FeatureLocation(ol_len, ol_len + core_len),
+                        type="misc_feature",
+                        qualifiers={"label": [safe_name]},
+                    ),
+                    SeqFeature(
+                        FeatureLocation(ol_len + core_len, len(full_seq)),
+                        type="misc_feature",
+                        qualifiers={"label": [or_key]},
+                    ),
+                ]
+                SeqIO.write(record, fpath, "genbank")
+
+    return errors
+
+
+def assemble_gibson(
+    filtered: dict[str, tuple],
+    withvector_path: str,
+    module_insert_path: str,
+    vector_path: str | None = None,
+    vector_overlap_left: str | None = None,
+    vector_overlap_right: str | None = None,
+) -> tuple[list[CombinationResult], list[str]]:
+    """
+    Run Gibson assembly for each filtered combination.
+
+    Fragments already contain overlap regions on both ends
+    (prepared by prepare_gibson_fragments).
+
+    When vector_path is provided:
+    - Wrap vector: overlap_right_last + vector_seq + overlap_left_first
+    - Assemble circular (assemble_circular)
+    When no vector:
+    - Assemble linear (assemble_linear)
+
+    Uses terminal_overlap with a configurable minimum overlap length.
+    """
+    results: list[CombinationResult] = []
+    errors: list[str] = []
+    min_overlap = _gibson_terminal_overlap_limit()
+
+    # Read vector sequence once
+    vector_seq: str | None = None
+    if vector_path:
+        try:
+            vec_rec = pydna_read(vector_path)
+            vector_seq = str(vec_rec.seq).upper().replace("N", "A")
+        except Exception as exc:
+            errors.append(f"Vector read error: {exc}")
+
+    for combo_key, gb_files in filtered.items():
+        fragments: list = []
+        failed = False
+
+        # Collect part fragments
+        for gbfile in gb_files:
+            try:
+                record = SeqIO.read(os.path.join(withvector_path, gbfile), "genbank")
+                frag = Dseqrecord(str(record.seq).upper(), linear=True)
+                # Carry forward only the core part feature (not overlap labels)
+                _OHG_RE = re.compile(r'^[ACGTacgt]{3,8}$')
+                frag.features = [
+                    f for f in record.features
+                    if not _OHG_RE.match(f.qualifiers.get("label", [""])[0])
+                ]
+                fragments.append(frag)
+            except Exception as exc:
+                errors.append(f"{combo_key}/{gbfile}: {type(exc).__name__}: {exc}")
+                failed = True
+                break
+
+        if failed or not fragments:
+            continue
+
+        try:
+            do_circular = False
+            if vector_seq:
+                # Extract terminal overlaps from the combination filenames
+                first_stem = gb_files[0].replace("-withvector.gb", "")
+                last_stem  = gb_files[-1].replace("-withvector.gb", "")
+                ol_first_key = first_stem.split("-")[0]   # 8nt prefix of first part's OL
+                or_last_key  = last_stem.split("-")[-1]   # 8nt prefix of last part's OR
+
+                # Validate vector_overlap_left/right if specified
+                overhang_mismatch = False
+                if vector_overlap_left and not vector_overlap_left.upper().startswith(ol_first_key):
+                    errors.append(
+                        f"{combo_key}: 벡터 좌측 오버랩 불일치 — "
+                        f"벡터 요구 '{vector_overlap_left[:8]}', 첫 번째 파트 OL '{ol_first_key}'. "
+                        "조합이 제외됩니다."
+                    )
+                    overhang_mismatch = True
+                if vector_overlap_right and not vector_overlap_right.upper().startswith(or_last_key):
+                    errors.append(
+                        f"{combo_key}: 벡터 우측 오버랩 불일치 — "
+                        f"벡터 요구 '{vector_overlap_right[:8]}', 마지막 파트 OR '{or_last_key}'. "
+                        "조합이 제외됩니다."
+                    )
+                    overhang_mismatch = True
+
+                if overhang_mismatch:
+                    failed = True
+                else:
+                    # Vector fragment: OR_last + vector + OL_first
+                    # (so terminal_overlap finds: fragments[-1] end matches vec start,
+                    #  vec end matches fragments[0] start)
+                    ol_seq = vector_overlap_left.upper() if vector_overlap_left else ""
+                    or_seq = vector_overlap_right.upper() if vector_overlap_right else ""
+                    vec_full = or_seq + vector_seq + ol_seq
+                    vec_frag = Dseqrecord(vec_full, linear=True)
+                    vec_frag.features = [
+                        SeqFeature(
+                            FeatureLocation(len(or_seq), len(or_seq) + len(vector_seq)),
+                            type="misc_feature",
+                            qualifiers={"label": ["vector_backbone"]},
+                        )
+                    ]
+                    fragments = [vec_frag] + fragments
+                    do_circular = True
+
+            if failed:
+                continue
+
+            asm = Assembly(fragments, algorithm=terminal_overlap, limit=min_overlap)
+            if do_circular:
+                candidate = asm.assemble_circular()
+                mode = "circular"
+            else:
+                candidate = asm.assemble_linear()
+                mode = "linear"
+
+            if not candidate:
+                errors.append(f"{combo_key}: {mode} assembly produced no candidates")
+                continue
+
+            assembled = remove_duplicate_features(candidate[0])
+
+            # Strip assembly-artifact features
+            _OHG_RE2 = re.compile(r'^[ACGTacgt]{3,8}$')
+            seq_len = len(assembled.seq)
+            assembled.features = [
+                f for f in assembled.features
+                if not (
+                    f.qualifiers.get("label", [""])[0] in ("vector_backbone",)
+                    or _OHG_RE2.match(f.qualifiers.get("label", [""])[0])
+                    or int(f.location.start) >= int(f.location.end)
+                    or int(f.location.end) > seq_len
+                )
+            ]
+
+            assembled.write(os.path.join(module_insert_path, f"{combo_key}.gb"))
+
+            bio_record = SeqRecord(
+                Seq(str(assembled.seq)),
+                id=combo_key[:16],
+                name=combo_key[:16],
+                description=combo_key,
+                features=assembled.features,
+                annotations={"molecule_type": "DNA"},
+            )
+
+            results.append(CombinationResult(
+                id=combo_key,
+                sequence=str(assembled.seq),
+                length=len(assembled.seq),
+                genbank_b64=record_to_genbank_b64(bio_record),
+                primers=[],   # Gibson assembly는 별도 primer 설계 불필요 (overlap이 primer 역할)
+                features=extract_features(assembled),
+            ))
+
+        except Exception as exc:
+            errors.append(f"{combo_key}: assembly error: {exc}")
+
+    return results, errors
 
 
 def clone_parts_into_vector(
@@ -529,35 +1101,54 @@ def filter_combinations_by_overhang(
     withvector_files: list[str],
 ) -> dict[str, tuple]:
     """
-    Generate all part combinations per module and filter by overhang compatibility.
-    Adapted from part_assembly.get_all_possible_combinations().
+    Generate all part combinations across ALL modules (sequential) and filter
+    by overhang compatibility.
+
+    All slots from all modules are treated as an ordered sequence. The Cartesian
+    product is taken across the entire slot list, and the overhang chain is
+    validated end-to-end (including inter-module junctions).
+
+    Key scheme: "{all_module_ids_joined}_{part_names_joined}"
+
+    Example:
+        Module 1: [PromA|PromB] — [RBS1]
+        Module 2: [HcaR|HbpR]
+        → 4 combinations: PromA-RBS1-HcaR, PromA-RBS1-HbpR, ...
     """
     filtered: dict[str, tuple] = {}
 
-    for module in modules:
-        slots_files: list[list[str]] = []
-        for i, slot in enumerate(module.slots):
-            matching = [wf for wf in withvector_files
-                        for pname in slot.part_names if pname in wf]
-            slots_files.append(matching)
+    # Flatten all slots from all modules in order
+    all_slots: list[ModuleSlot] = [slot for module in modules for slot in module.slots]
+    module_prefix = "_".join(m.id for m in modules)
 
-        for combo in iter_product(*slots_files):
-            if len(combo) < 2:
-                if combo:
-                    fname = combo[0]
-                    key = fname.replace("-withvector.gb", "")
-                    filtered[f"{module.id}_{key}"] = combo
-                continue
+    if not all_slots:
+        return filtered
 
-            overhang_right = [f.replace("-withvector.gb", "").split("-")[-1] for f in combo[:-1]]
-            overhang_left  = [f.replace("-withvector.gb", "").split("-")[0]  for f in combo[1:]]
+    # For each slot, collect matching withvector files
+    slots_files: list[list[str]] = []
+    for slot in all_slots:
+        matching = [wf for wf in withvector_files
+                    for pname in slot.part_names if pname in wf]
+        slots_files.append(matching)
 
-            if overhang_right == overhang_left:
-                key = "-".join(
-                    "-".join(f.replace("-withvector.gb", "").split("-")[1:-1])
-                    for f in combo
-                )
-                filtered[f"{module.id}_{key}"] = combo
+    for combo in iter_product(*slots_files):
+        if len(combo) < 2:
+            if combo:
+                fname = combo[0]
+                key = fname.replace("-withvector.gb", "")
+                filtered[f"{module_prefix}_{key}"] = combo
+            continue
+
+        # Validate full overhang chain (including inter-module junctions)
+        overhang_right = [f.replace("-withvector.gb", "").split("-")[-1] for f in combo[:-1]]
+        overhang_left  = [f.replace("-withvector.gb", "").split("-")[0]  for f in combo[1:]]
+
+        if overhang_right == overhang_left:
+            key = "-".join(
+                "-".join(f.replace("-withvector.gb", "").split("-")[1:-1])
+                for f in combo
+            )
+            filtered[f"{module_prefix}_{key}"] = combo
 
     return filtered
 
@@ -569,6 +1160,7 @@ def assemble_goldengate(
     vector_path: str | None = None,
     vector_overhang_left: str | None = None,
     vector_overhang_right: str | None = None,
+    parts: list | None = None,
 ) -> tuple[list[CombinationResult], list[str]]:
     """
     Run Golden Gate assembly for each filtered combination.
@@ -579,6 +1171,7 @@ def assemble_goldengate(
     """
     results: list[CombinationResult] = []
     errors: list[str] = []
+    parts = parts or []
 
     # Read vector sequence once (used for all combinations)
     vector_seq: str | None = None
@@ -656,7 +1249,19 @@ def assemble_goldengate(
                     failed = True
                     break
 
-                fragments.append(max(cut_fragments, key=lambda x: len(x)))
+                stem = gbfile.replace("-withvector.gb", "")
+                stem_parts = stem.split("-")
+                expected_ohl = stem_parts[0] if len(stem_parts) >= 3 else ""
+                expected_ohr = stem_parts[-1] if len(stem_parts) >= 3 else ""
+                expected_name = "-".join(stem_parts[1:-1]) if len(stem_parts) >= 3 else stem
+
+                selected_fragment = _pick_goldengate_fragment(
+                    cut_fragments,
+                    part_label=expected_name,
+                    overhang_left=expected_ohl,
+                    overhang_right=expected_ohr,
+                )
+                fragments.append(selected_fragment)
                 if ifwd is not None and irev is not None:
                     primer_list += [
                         PrimerResult(
@@ -767,7 +1372,13 @@ def assemble_goldengate(
                 candidate = asm.assemble_linear()
                 mode = "linear"
             if not candidate:
-                errors.append(f"{combo_key}: {mode} assembly produced no candidates")
+                errors.append(
+                    f"{combo_key}: {mode} assembly produced no candidates.\n"
+                    f"Declared chain: {_format_goldengate_declared_chain(gb_files, do_circular)}\n"
+                    f"Actual fragments: {_format_goldengate_fragment_summary(fragments)}\n"
+                    "Likely causes: internal BsaI site, incorrect cut-fragment selection, "
+                    "or sticky-end orientation mismatch."
+                )
                 continue
 
             assembled = remove_duplicate_features(candidate[0])
@@ -788,6 +1399,12 @@ def assemble_goldengate(
                     or int(f.location.end) > seq_len
                 )
             ]
+
+            # Restore part features that may have been dropped by pydna
+            # during restriction digestion + assembly
+            _reannotate_goldengate_assembly(
+                assembled, gb_files, withvector_path, parts
+            )
 
             assembled.write(os.path.join(module_insert_path, f"{combo_key}.gb"))
 
@@ -866,12 +1483,25 @@ async def run_assembly(request: RunRequest):
 
         errors: list[str] = []
 
-        # Step 1 & 2
-        if request.assembly_method == "goldengate":
-            gg_errors = prepare_goldengate_fragments(
-                request.parts, request.modules, withvector_path
+        # Step 1 & 2: prepare fragments per assembly method
+        if request.assembly_method == "3g":
+            return RunResponse(
+                combinations=[],
+                total_combinations=0,
+                errors=["3G Assembly (GoldenGate + Gibson 결합)는 준비 중입니다."],
             )
-            errors.extend(gg_errors)
+        elif request.assembly_method == "goldengate":
+            primer_inputs_map = {
+                p.id: p for p in (request.primer_inputs or [])
+            }
+            errors.extend(prepare_goldengate_fragments(
+                request.parts, request.modules, withvector_path,
+                primer_inputs_map=primer_inputs_map,
+            ))
+        elif request.assembly_method == "gibson":
+            errors.extend(prepare_gibson_fragments(
+                request.parts, request.modules, withvector_path
+            ))
         else:
             create_insert_genbank_files(request.parts, insert_path)
             _, clone_errors = clone_parts_into_vector(
@@ -887,11 +1517,11 @@ async def run_assembly(request: RunRequest):
                 total_combinations=0,
                 errors=errors + [
                     "No withvector files generated. "
-                    "Sequences may be too short for Gibson assembly or vector cloning failed."
+                    "Sequences may be too short for assembly or vector cloning failed."
                 ],
             )
 
-        # Step 3
+        # Step 3: filter combinations by overhang/overlap compatibility
         filtered = filter_combinations_by_overhang(request.modules, withvector_files)
         if not filtered:
             return RunResponse(
@@ -899,23 +1529,50 @@ async def run_assembly(request: RunRequest):
                 total_combinations=0,
                 errors=errors + [
                     "No valid combinations after overhang filtering. "
-                    "Verify that adjacent parts share matching overhangs."
+                    "Verify that adjacent parts share matching overhangs (GoldenGate: 4nt, Gibson: 20+nt prefix)."
                 ],
             )
 
-        # Step 4
-        results, asm_errors = assemble_goldengate(
-            filtered, withvector_path, module_insert_path,
-            vector_path=vector_path,
-            vector_overhang_left=request.vector_overhang_left,
-            vector_overhang_right=request.vector_overhang_right,
-        )
+        # Step 4: assemble
+        if request.assembly_method == "gibson":
+            results, asm_errors = assemble_gibson(
+                filtered, withvector_path, module_insert_path,
+                vector_path=vector_path,
+                vector_overlap_left=request.vector_overlap_left,
+                vector_overlap_right=request.vector_overlap_right,
+            )
+        else:
+            results, asm_errors = assemble_goldengate(
+                filtered, withvector_path, module_insert_path,
+                vector_path=vector_path,
+                vector_overhang_left=request.vector_overhang_left,
+                vector_overhang_right=request.vector_overhang_right,
+                parts=request.parts,
+            )
         errors.extend(asm_errors)
+
+        # Build primer_positions from primer_inputs (coordinates computed on frontend)
+        primer_positions: list[PrimerPosition] = []
+        if request.primer_inputs:
+            primer_input_map = {p.id: p for p in request.primer_inputs}
+            for pid in (request.primer_ids or [p.id for p in request.primer_inputs]):
+                if pid in primer_input_map:
+                    p = primer_input_map[pid]
+                    primer_positions.append(PrimerPosition(
+                        primer_id=p.id, name=p.name,
+                        sequence=p.sequence, direction=p.direction,
+                    ))
+                else:
+                    errors.append(f"[경고] primer_id '{pid}' 가 primer_inputs에 없음 — 좌표 계산 불가")
+        elif request.primer_ids:
+            for pid in request.primer_ids:
+                errors.append(f"[경고] primer_id '{pid}' 요청됨 — primer_inputs 미제공으로 좌표 계산 불가")
 
         return RunResponse(
             combinations=results,
             total_combinations=len(results),
             errors=errors,
+            primer_positions=primer_positions,
         )
 
     finally:
